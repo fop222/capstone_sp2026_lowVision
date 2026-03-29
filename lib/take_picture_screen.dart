@@ -2,6 +2,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
 
 import 'display_picture_screen.dart';
 import 'save_image_stub.dart' if (dart.library.html) 'save_image_web.dart';
@@ -27,6 +30,8 @@ class _TakePictureScreenState extends State<TakePictureScreen> {
   bool _isTakingPicture = false;
   String? _error;
   final ImagePicker _picker = ImagePicker();
+  String detectedLabel = "No object yet";
+
 
   @override
   void initState() {
@@ -51,33 +56,81 @@ class _TakePictureScreenState extends State<TakePictureScreen> {
     super.dispose();
   }
 
-  Future<void> _takePicture() async {
-    if (_isTakingPicture || _error != null) return;
-    setState(() => _isTakingPicture = true);
+Future<void> _takePicture() async {
+  if (_isTakingPicture || _error != null) return;
+  setState(() => _isTakingPicture = true);
 
-    try {
-      await _initializeControllerFuture;
-      final xFile = await _controller.takePicture();
-      final bytes = await xFile.readAsBytes();
-      if (bytes.isEmpty || !mounted) return;
+  try {
+    await _initializeControllerFuture;
 
-      if (kIsWeb) {
-        final name = xFile.name.isNotEmpty ? xFile.name : _defaultPhotoName();
-        saveImageToDownloads(bytes, name);
-      }
+    final xFile = await _controller.takePicture();
+    final bytes = await xFile.readAsBytes();
 
-      if (!mounted) return;
-      await DisplayPictureScreen.push(context, bytes);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isTakingPicture = false);
+    if (bytes.isEmpty || !mounted) return;
+
+    print("Picture taken");
+
+    // Save on web (your existing logic)
+    if (kIsWeb) {
+      final name = xFile.name.isNotEmpty ? xFile.name : _defaultPhotoName();
+      saveImageToDownloads(bytes, name);
     }
+
+    // 🔥 SEND TO SERVER
+    var request = http.MultipartRequest(
+      "POST",
+      Uri.parse("http://128.180.121.230:5010/predict"),
+    );
+
+    request.files.add(
+      kIsWeb
+          ? http.MultipartFile.fromBytes(
+              "image",
+              bytes,
+              filename: xFile.name.isNotEmpty ? xFile.name : "upload.jpg",
+            )
+          : await http.MultipartFile.fromPath(
+              "image",
+              xFile.path,
+            ),
+    );
+
+    print("Sending request...");
+
+    var response = await request.send();
+
+    print("Response received");
+
+    var responseData = await response.stream.bytesToString();
+    var decoded = jsonDecode(responseData);
+
+    if (!mounted) return;
+
+    if (decoded.isNotEmpty) {
+      List labels = decoded.map((obj) => obj["label"]).toList();
+
+      setState(() {
+        detectedLabel = labels.join(", ");
+      });
+    } else {
+      setState(() {
+        detectedLabel = "No object detected";
+      });
+    }
+
+    // Show image after processing
+    await DisplayPictureScreen.push(context, bytes);
+
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  } finally {
+    if (mounted) setState(() => _isTakingPicture = false);
   }
+}
 
   Future<void> _pickFromGallery() async {
     final xFile = await _picker.pickImage(source: ImageSource.gallery);
@@ -182,6 +235,27 @@ class _TakePictureScreenState extends State<TakePictureScreen> {
               ),
             ),
           ),
+
+          Positioned(
+                top: 60,
+                left: 20,
+                right: 20,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    detectedLabel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
         ],
       ),
       floatingActionButton: Row(
