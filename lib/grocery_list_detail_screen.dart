@@ -35,16 +35,56 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
   bool _speechAvailable = false;
 
   static const _categories = [
-    'Produce',
-    'Dairy',
-    'Meat & Seafood',
-    'Bakery',
-    'Frozen',
-    'Pantry',
-    'Beverages',
+    'Cereal',
+    'Hot cereal',
+    'Dry fruit',
+    'Fruit snacks',
+    'Juice',
+    'Baby food',
+    'Diapers',
+    'Sports drinks',
+    'Soda',
+    'Water',
     'Snacks',
-    'Household',
-    'Other',
+    'Chips',
+    'Cookies',
+    'Crackers',
+    'Candy',
+    'Baking goods',
+    'Flour',
+    'Sugar',
+    'Oils',
+    'Pasta',
+    'Rice',
+    'Beans',
+    'International foods',
+    'Canned vegetables',
+    'Canned fruit',
+    'Soup',
+    'Condiments',
+    'Sauces',
+    'Spices',
+    'Coffee',
+    'Tea',
+    'Breakfast items',
+    'Frozen foods',
+    'Ice cream',
+    'Dairy',
+    'Milk',
+    'Eggs',
+    'Cheese',
+    'Yogurt',
+    'Deli',
+    'Meat',
+    'Seafood',
+    'Produce',
+    'Bread',
+    'Bakery',
+    'Paper goods',
+    'Cleaning supplies',
+    'Pet food',
+    'Health & beauty',
+    'Pharmacy items',
   ];
 
   @override
@@ -466,14 +506,13 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
 
     // Step 2 — category
     await _speak(
-        'What category is $_itemName? Say produce, dairy, meat, bakery, '
-        'frozen, pantry, beverages, snacks, household, or other.');
+        'What category is $_itemName? Say one of the grocery categories in your list.');
     if (_cancelled) return;
 
     final catRaw = await _listenForWords();
     if (_cancelled) return;
 
-    _itemCategory = _matchCategory(catRaw) ?? 'Other';
+    _itemCategory = _matchCategory(catRaw) ?? widget.categories.first;
 
     // Step 3 — confirm and save
     await _speak('Adding $_itemName to $_itemCategory.');
