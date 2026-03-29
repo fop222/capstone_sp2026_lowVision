@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -59,7 +60,9 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   int _cameraIndex = 0;
 
   final FlutterTts _tts = FlutterTts();
+  final SpeechToText _speech = SpeechToText();
   bool _audioEnabled = true;
+  bool _speechAvailable = false;
 
   _Phase _phase = _Phase.aisleSign;
   int _currentAisle = 1;
@@ -81,6 +84,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     _items = widget.items.map(_Item.fromMap).toList();
     _tts.awaitSpeakCompletion(true);
     _initCamera();
+    _initSpeech();
     WidgetsBinding.instance.addPostFrameCallback((_) => _speak(
           'Shopping mode started for ${widget.listTitle}. '
           'Point your camera at the aisle sign and tap Scan Aisle Sign.',
@@ -90,8 +94,21 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   @override
   void dispose() {
     _camera?.dispose();
+    _speech.stop();
     _tts.stop();
     super.dispose();
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      _speechAvailable = await _speech.initialize(
+        onError: (_) {},
+        onStatus: (_) {},
+      );
+    } catch (_) {
+      _speechAvailable = false;
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _initCamera() async {
@@ -187,6 +204,32 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       return null;
     } finally {
       if (mounted) setState(() => _ocrLoading = false);
+    }
+  }
+
+  Future<List<String>> _runYoloPredict(Uint8List bytes) async {
+    try {
+      final req = http.MultipartRequest('POST', predictUri())
+        ..files.add(
+            http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'));
+      final res = await req.send();
+      final body = await res.stream.bytesToString();
+      if (res.statusCode != 200) return [];
+      final decoded = json.decode(body);
+      if (decoded is! List) return [];
+
+      final labels = <String>{};
+      for (final row in decoded) {
+        if (row is Map<String, dynamic>) {
+          final label = row['label'] as String?;
+          if (label != null && label.trim().isNotEmpty) {
+            labels.add(label.trim());
+          }
+        }
+      }
+      return labels.toList();
+    } catch (_) {
+      return [];
     }
   }
 
@@ -289,6 +332,144 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     return _itemMatchesSign(target, shelfWords);
   }
 
+  Future<bool> _listenForCheckOffCommand() async {
+    if (!_speechAvailable) return false;
+    String recognized = '';
+    await _speech.listen(
+      onResult: (r) {
+        recognized = r.recognizedWords.toLowerCase();
+      },
+      listenFor: const Duration(seconds: 5),
+      pauseFor: const Duration(seconds: 2),
+      cancelOnError: false,
+    );
+    await Future<void>.delayed(const Duration(seconds: 5));
+    await _speech.stop();
+    return recognized.contains('check') ||
+        recognized.contains('yes') ||
+        recognized.contains('found') ||
+        recognized.contains('done');
+  }
+
+  Future<void> _promptShelfDecision(_Item target) async {
+    bool checked = target.isChecked;
+    bool processingVoice = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isDismissible: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Target item: ${target.name}',
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _shelfStatusMessage.isEmpty
+                          ? 'Detected results shown above.'
+                          : _shelfStatusMessage,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 12),
+                    CheckboxListTile(
+                      value: checked,
+                      onChanged: (v) => setModalState(() => checked = v ?? false),
+                      title: const Text('Check off this item'),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: processingVoice || !_speechAvailable
+                                ? null
+                                : () async {
+                                    setModalState(() => processingVoice = true);
+                                    await _speak(
+                                        'Say check off, yes, found, or done to check this item.');
+                                    final confirmed = await _listenForCheckOffCommand();
+                                    if (!mounted) return;
+                                    setModalState(() {
+                                      processingVoice = false;
+                                      if (confirmed) checked = true;
+                                    });
+                                  },
+                            icon: processingVoice
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : const Icon(Icons.mic),
+                            label: Text(
+                                _speechAvailable ? 'Voice check-off' : 'Voice unavailable'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('Keep scanning'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              if (checked) {
+                                target.isChecked = true;
+                              }
+                              Navigator.pop(ctx);
+                            },
+                            child: const Text('Continue'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _advanceAfterShelfDecision() async {
+    final current = _currentShelfTarget;
+    if (current != null && current.isChecked) {
+      if (_shelfPromptIndex < _pendingShelfItems.length - 1) {
+        _shelfPromptIndex++;
+        final nextItem = _pendingShelfItems[_shelfPromptIndex];
+        await _speak('Next target item is ${nextItem.name}. Scan the shelf.');
+        setState(() => _phase = _Phase.shelf);
+      } else {
+        await _speak(
+            'All target items in aisle $_currentAisle are complete. You can move to the next aisle.');
+        setState(() => _phase = _Phase.shelfResults);
+      }
+    } else {
+      await _speak('Continue scanning the shelf for ${current?.name ?? "the item"}.');
+      setState(() => _phase = _Phase.shelf);
+    }
+  }
+
   Future<void> _onScanAisleSign({bool fromGallery = false}) async {
     final Uint8List? bytes;
     if (fromGallery) {
@@ -359,6 +540,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     }
     _shelfOcrText = shelfText;
     _shelfMatches = _matchItems(shelfText);
+    final yoloLabels = await _runYoloPredict(bytes);
 
     final timestamp =
         DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-');
@@ -375,47 +557,27 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     final matchedNames = _shelfMatches.map((i) => i.name).join(', ');
     final targetFound =
         target != null && _isTargetFoundInShelfText(target, shelfText);
+    final yoloText =
+        yoloLabels.isEmpty ? 'YOLO detected: nothing clear.' : 'YOLO detected: ${yoloLabels.join(", ")}.';
 
-    if (target != null && !targetFound) {
-      setState(() {
-        _phase = _Phase.shelf;
-        _shelfStatusMessage = matchedNames.isEmpty
-            ? 'Scanned shelf text, but ${target.name} was not found.'
-            : 'Found: $matchedNames. Still missing: ${target.name}.';
-      });
-      await _speak(
-          '${target.name} not found on this shelf. Please scan this shelf area again.');
+    setState(() {
+      if (matchedNames.isEmpty) {
+        _shelfStatusMessage = yoloText;
+      } else {
+        _shelfStatusMessage = 'Detected list matches: $matchedNames. $yoloText';
+      }
+      _phase = _Phase.shelf;
+    });
+
+    await _speak(_shelfStatusMessage);
+    if (target != null && targetFound) {
+      target.isChecked = true;
+    }
+    if (target != null) {
+      await _promptShelfDecision(target);
+      await _advanceAfterShelfDecision();
       return;
     }
-
-    if (target != null && targetFound) {
-      setState(() {
-        _shelfStatusMessage = matchedNames.isEmpty
-            ? 'Found target: ${target.name}.'
-            : 'Found target: ${target.name}. Also matched: $matchedNames';
-      });
-      await _speak('Found ${target.name}.');
-
-      if (_shelfPromptIndex < _pendingShelfItems.length - 1) {
-        _shelfPromptIndex++;
-        final nextItem = _pendingShelfItems[_shelfPromptIndex];
-        await _speak('Next target item is ${nextItem.name}. Scan the shelf.');
-        setState(() => _phase = _Phase.shelf);
-        return;
-      }
-
-      if (_pendingShelfItems.length > 1) {
-        await _speak('All aisle target items were found on shelf scans.');
-      }
-    } else {
-      if (_shelfMatches.isEmpty) {
-        await _speak('Shelf scanned. No list items found on this shelf.');
-      } else {
-        await _speak(
-            '${_shelfMatches.length} item${_shelfMatches.length == 1 ? "" : "s"} found on this shelf: $matchedNames.');
-      }
-    }
-
     setState(() => _phase = _Phase.shelfResults);
   }
 

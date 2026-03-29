@@ -23,3 +23,6 @@ Uri ocrMultipartUri() =>
 
 /// URI for saving the image to the MAGIC server's Images_2026 folder.
 Uri uploadUri() => Uri.parse('${ocrServiceBaseUrl()}/upload');
+
+/// URI for YOLOv8 object detection predictions.
+Uri predictUri() => Uri.parse('${ocrServiceBaseUrl()}/predict');

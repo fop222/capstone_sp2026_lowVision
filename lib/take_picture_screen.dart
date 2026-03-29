@@ -7,6 +7,7 @@ import 'dart:convert';
 
 
 import 'display_picture_screen.dart';
+import 'ocr_config.dart';
 import 'save_image_stub.dart' if (dart.library.html) 'save_image_web.dart';
 
 late List<CameraDescription> cameras;
@@ -79,7 +80,7 @@ Future<void> _takePicture() async {
     // 🔥 SEND TO SERVER
     var request = http.MultipartRequest(
       "POST",
-      Uri.parse("http://128.180.121.230:5010/predict"),
+      predictUri(),
     );
 
     request.files.add(
