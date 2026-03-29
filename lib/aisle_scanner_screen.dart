@@ -67,6 +67,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   String? _ocrError;
   String _aisleOcrText = '';
   String _shelfOcrText = '';
+  String _shelfStatusMessage = '';
   List<_Item> _aisleMatches = [];
   List<_Item> _shelfMatches = [];
   List<_Item> _pendingShelfItems = [];
@@ -244,14 +245,17 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
 
   bool _isFuzzyTokenMatch(String target, String candidate) {
     if (target == candidate) return true;
-    if (target.length >= 5 &&
-        candidate.length >= 5 &&
-        (target.contains(candidate) || candidate.contains(target))) {
+    // Keep partial matching conservative to avoid aisle false positives.
+    if (target.length >= 6 &&
+        candidate.length >= 6 &&
+        target[0] == candidate[0] &&
+        (target.startsWith(candidate) || candidate.startsWith(target))) {
       return true;
     }
-    final maxDistance = target.length >= 8 || candidate.length >= 8 ? 2 : 1;
-    return _levenshteinDistance(target, candidate, maxDistance: maxDistance) <=
-        maxDistance;
+    // OCR typo tolerance is only allowed when the words are very similar.
+    if (target[0] != candidate[0]) return false;
+    final maxDistance = target.length >= 10 || candidate.length >= 10 ? 2 : 1;
+    return _levenshteinDistance(target, candidate, maxDistance: maxDistance) <= maxDistance;
   }
 
   bool _itemMatchesSign(_Item item, Set<String> signWords) {
@@ -270,6 +274,19 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       if (item.isChecked) return false;
       return _itemMatchesSign(item, signWords);
     }).toList();
+  }
+
+  _Item? get _currentShelfTarget {
+    if (_pendingShelfItems.isEmpty) return null;
+    if (_shelfPromptIndex < 0 || _shelfPromptIndex >= _pendingShelfItems.length) {
+      return null;
+    }
+    return _pendingShelfItems[_shelfPromptIndex];
+  }
+
+  bool _isTargetFoundInShelfText(_Item target, String shelfText) {
+    final shelfWords = _tokenize(shelfText);
+    return _itemMatchesSign(target, shelfWords);
   }
 
   Future<void> _onScanAisleSign({bool fromGallery = false}) async {
@@ -312,6 +329,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       _phase = _Phase.shelf;
       _shelfOcrText = '';
       _shelfMatches = [];
+      _shelfStatusMessage = '';
     });
     await _restartCamera();
     if (_pendingShelfItems.isNotEmpty) {
@@ -348,23 +366,54 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
 
     try {
       await _uploadToMagic(bytes, filename);
-      if (_shelfMatches.isEmpty) {
-        await _speak('Shelf image saved. No list items found on this shelf.');
-      } else {
-        final names = _shelfMatches.map((i) => i.name).join(', ');
-        await _speak(
-            '${_shelfMatches.length} item${_shelfMatches.length == 1 ? "" : "s"} found on this shelf: $names.');
-      }
+      // Best-effort upload only; matching flow should continue either way.
     } catch (_) {
-      await _speak('Could not save the image. Please try again.');
+      // Keep going even if upload fails.
     }
 
-    if (_pendingShelfItems.isNotEmpty && _shelfPromptIndex < _pendingShelfItems.length - 1) {
-      _shelfPromptIndex++;
-      final nextItem = _pendingShelfItems[_shelfPromptIndex];
-      await _speak('Next, scan shelf for ${nextItem.name}.');
-    } else if (_pendingShelfItems.length > 1) {
-      await _speak('You have scanned shelves for all matched items in this aisle.');
+    final target = _currentShelfTarget;
+    final matchedNames = _shelfMatches.map((i) => i.name).join(', ');
+    final targetFound =
+        target != null && _isTargetFoundInShelfText(target, shelfText);
+
+    if (target != null && !targetFound) {
+      setState(() {
+        _phase = _Phase.shelf;
+        _shelfStatusMessage = matchedNames.isEmpty
+            ? 'Scanned shelf text, but ${target.name} was not found.'
+            : 'Found: $matchedNames. Still missing: ${target.name}.';
+      });
+      await _speak(
+          '${target.name} not found on this shelf. Please scan this shelf area again.');
+      return;
+    }
+
+    if (target != null && targetFound) {
+      setState(() {
+        _shelfStatusMessage = matchedNames.isEmpty
+            ? 'Found target: ${target.name}.'
+            : 'Found target: ${target.name}. Also matched: $matchedNames';
+      });
+      await _speak('Found ${target.name}.');
+
+      if (_shelfPromptIndex < _pendingShelfItems.length - 1) {
+        _shelfPromptIndex++;
+        final nextItem = _pendingShelfItems[_shelfPromptIndex];
+        await _speak('Next target item is ${nextItem.name}. Scan the shelf.');
+        setState(() => _phase = _Phase.shelf);
+        return;
+      }
+
+      if (_pendingShelfItems.length > 1) {
+        await _speak('All aisle target items were found on shelf scans.');
+      }
+    } else {
+      if (_shelfMatches.isEmpty) {
+        await _speak('Shelf scanned. No list items found on this shelf.');
+      } else {
+        await _speak(
+            '${_shelfMatches.length} item${_shelfMatches.length == 1 ? "" : "s"} found on this shelf: $matchedNames.');
+      }
     }
 
     setState(() => _phase = _Phase.shelfResults);
@@ -375,6 +424,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       _phase = _Phase.shelf;
       _shelfOcrText = '';
       _shelfMatches = [];
+      _shelfStatusMessage = '';
     });
     await _restartCamera();
     if (_pendingShelfItems.isNotEmpty &&
@@ -394,6 +444,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       _shelfOcrText = '';
       _aisleMatches = [];
       _shelfMatches = [];
+      _shelfStatusMessage = '';
       _pendingShelfItems = [];
       _shelfPromptIndex = 0;
     });
@@ -464,6 +515,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
 
   Widget _buildCameraView() {
     final isAisle = _phase == _Phase.aisleSign;
+    final targetItem = _currentShelfTarget;
     return Column(
       children: [
         Expanded(
@@ -509,6 +561,29 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                       onPressed: _flipCamera,
                       icon: const Icon(Icons.cameraswitch,
                           color: Colors.white),
+                    ),
+                  ),
+                ),
+              if (!isAisle && targetItem != null)
+                Positioned(
+                  top: 130,
+                  left: 12,
+                  right: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00E5FF).withOpacity(0.95),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Target item: ${targetItem.name}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
@@ -577,41 +652,66 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
         SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: (_takingPicture || _ocrLoading || !_cameraReady)
-                        ? null
-                        : (isAisle
-                            ? () => _onScanAisleSign()
-                            : () => _onScanShelf()),
-                    icon: _takingPicture
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.camera_alt),
-                    label: Text(isAisle ? 'Scan Aisle Sign' : 'Scan Shelf',
-                        style: const TextStyle(fontSize: 16)),
-                    style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(0, 56),
-                        padding: const EdgeInsets.symmetric(vertical: 16)),
+                if (!isAisle && _shelfStatusMessage.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF00E5FF)),
+                    ),
+                    child: Text(
+                      _shelfStatusMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Color(0xFF00E5FF), fontSize: 16),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: (_takingPicture || _ocrLoading)
-                      ? null
-                      : (isAisle
-                          ? () => _onScanAisleSign(fromGallery: true)
-                          : () => _onScanShelf(fromGallery: true)),
-                  icon: const Icon(Icons.photo_library),
-                  label: const Text('Upload'),
-                  style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(0, 56),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 16, horizontal: 16)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed:
+                            (_takingPicture || _ocrLoading || !_cameraReady)
+                                ? null
+                                : (isAisle
+                                    ? () => _onScanAisleSign()
+                                    : () => _onScanShelf()),
+                        icon: _takingPicture
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.camera_alt),
+                        label: Text(isAisle ? 'Scan Aisle Sign' : 'Scan Shelf',
+                            style: const TextStyle(fontSize: 16)),
+                        style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(0, 56),
+                            padding: const EdgeInsets.symmetric(vertical: 16)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: (_takingPicture || _ocrLoading)
+                          ? null
+                          : (isAisle
+                              ? () => _onScanAisleSign(fromGallery: true)
+                              : () => _onScanShelf(fromGallery: true)),
+                      icon: const Icon(Icons.photo_library),
+                      label: const Text('Upload'),
+                      style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(0, 56),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 16, horizontal: 16)),
+                    ),
+                  ],
                 ),
               ],
             ),
