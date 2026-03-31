@@ -80,7 +80,7 @@ Future<void> _takePicture() async {
     // 🔥 SEND TO SERVER
     var request = http.MultipartRequest(
       "POST",
-      predictUri(),
+      yoloDetectUri(),
     );
 
     request.files.add(

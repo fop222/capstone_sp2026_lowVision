@@ -5,6 +5,7 @@ import 'grocery_list_detail_screen.dart';
 import 'supabase_auth_screen.dart';
 import 'take_picture_screen.dart';
 import 'aisle_scanner_screen.dart';
+import 'aisle_scanner_vlm_screen.dart';
 import 'profile_setup_screen.dart';
 
 /// Shows all grocery lists belonging to the signed-in user and lets them
@@ -274,6 +275,42 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                           SnackBar(
                                               content: Text(
                                                   'Error loading items: $e')),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Start shopping (VLM)',
+                                    icon: Icon(Icons.auto_awesome,
+                                        size: 28,
+                                        color: theme.colorScheme.secondary),
+                                    onPressed: () async {
+                                      try {
+                                        final items = await supabase
+                                            .from('grocery_items')
+                                            .select()
+                                            .eq('list_id', listId)
+                                            .order('name');
+                                        if (!context.mounted) return;
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => AisleScannerVlmScreen(
+                                              listId: listId,
+                                              listTitle: listTitle,
+                                              items:
+                                                  List<Map<String, dynamic>>.from(
+                                                      items),
+                                              cameras: cameras,
+                                            ),
+                                          ),
+                                        );
+                                      } catch (e) {
+                                        if (!context.mounted) return;
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                              content:
+                                                  Text('Error loading items: $e')),
                                         );
                                       }
                                     },

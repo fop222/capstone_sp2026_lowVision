@@ -8,6 +8,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
+import 'main.dart';
 import 'ocr_config.dart';
 import 'take_picture_screen.dart';
 
@@ -66,22 +67,28 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
 
   _Phase _phase = _Phase.aisleSign;
   int _currentAisle = 1;
+  String _currentAisleLabel = '1';
   bool _ocrLoading = false;
   String? _ocrError;
   String _aisleOcrText = '';
+  String _aisleStatusMessage = '';
   String _shelfOcrText = '';
   String _shelfStatusMessage = '';
+  String _vlmAnswer = '';
+  Uint8List? _lastShelfImageBytes;
   List<_Item> _aisleMatches = [];
   List<_Item> _shelfMatches = [];
   List<_Item> _pendingShelfItems = [];
   int _shelfPromptIndex = 0;
 
   late List<_Item> _items;
+  late final Map<String, bool> _initialCheckedById;
 
   @override
   void initState() {
     super.initState();
     _items = widget.items.map(_Item.fromMap).toList();
+    _initialCheckedById = {for (final item in _items) item.id: item.isChecked};
     _tts.awaitSpeakCompletion(true);
     _initCamera();
     _initSpeech();
@@ -200,7 +207,9 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       return null;
     } catch (_) {
       setState(() => _ocrError =
-          'Cannot reach OCR service. For local dev run ocr_server.py; for MAGIC use --dart-define=OCR_BASE_URL=<url>.');
+          'Cannot reach OCR service at ${ocrServiceBaseUrl()}. '
+          'For local dev run ocr_server.py (port 5010) or pass '
+          '--dart-define=OCR_BASE_URL=http://localhost:5010');
       return null;
     } finally {
       if (mounted) setState(() => _ocrLoading = false);
@@ -209,7 +218,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
 
   Future<List<String>> _runYoloPredict(Uint8List bytes) async {
     try {
-      final req = http.MultipartRequest('POST', predictUri())
+      final req = http.MultipartRequest('POST', yoloDetectUri())
         ..files.add(
             http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'));
       final res = await req.send();
@@ -231,6 +240,91 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     } catch (_) {
       return [];
     }
+  }
+
+  Future<String> _runVlmPredict(
+    Uint8List bytes, {
+    required String question,
+  }) async {
+    try {
+      final req = http.MultipartRequest('POST', vlmPredictUri())
+        ..files.add(
+            http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'))
+        ..fields['question'] = question;
+      final res = await req.send();
+      final body = await res.stream.bytesToString();
+      if (res.statusCode != 200) return '';
+      final decoded = json.decode(body) as Map<String, dynamic>;
+      return (decoded['answer'] as String? ?? '').trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _tryWithVlm() async {
+    final bytes = _lastShelfImageBytes;
+    if (bytes == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Scan or upload a shelf image first.')),
+      );
+      return;
+    }
+
+    final target = _currentShelfTarget;
+    final question = target != null
+        ? 'Is ${target.name} visible in this grocery shelf image? Answer yes or no first, then briefly describe what you see.'
+        : 'Identify the main grocery items visible in this shelf image. Be concise for a low-vision user.';
+
+    setState(() {
+      _ocrLoading = true;
+      _vlmAnswer = '';
+    });
+    final answer = await _runVlmPredict(bytes, question: question);
+    if (!mounted) return;
+    setState(() {
+      _ocrLoading = false;
+      _vlmAnswer = answer.isEmpty ? 'No VLM answer returned.' : answer;
+    });
+
+    await _speak(_vlmAnswer);
+
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'VLM Output',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _vlmAnswer,
+                style: const TextStyle(fontSize: 18),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   String _normalizeToken(String token) {
@@ -255,6 +349,41 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
         .map(_normalizeToken)
         .where((w) => w.length > 2)
         .toSet();
+  }
+
+  bool _looksLikeUsefulAisleText(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    final letterCount = RegExp(r'[A-Za-z]').allMatches(trimmed).length;
+    if (letterCount < 3) return false;
+    final tokens = _tokenize(trimmed);
+    if (tokens.isEmpty) return false;
+    if (tokens.length >= 2 && tokens.any((t) => t.length >= 4)) return true;
+
+    // One-word aisle signs are common ("soda", "beverages").
+    if (tokens.length == 1) {
+      final token = tokens.first;
+      if (token.length >= 3) return true;
+      if (_looksLikeKnownShoppingWord(tokens)) return true;
+      return false;
+    }
+
+    return _looksLikeKnownShoppingWord(tokens);
+  }
+
+  bool _looksLikeKnownShoppingWord(Set<String> signTokens) {
+    if (signTokens.isEmpty) return false;
+    final knownTokens = <String>{};
+    for (final item in _items) {
+      knownTokens.addAll(_tokenize(item.name));
+      knownTokens.addAll(_tokenize(item.category));
+    }
+    for (final signToken in signTokens) {
+      if (knownTokens.any((known) => _isFuzzyTokenMatch(known, signToken))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   int _levenshteinDistance(String a, String b, {int maxDistance = 2}) {
@@ -430,10 +559,12 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: ElevatedButton(
-                            onPressed: () {
+                            onPressed: () async {
                               if (checked) {
                                 target.isChecked = true;
+                                await _saveItemCheckedState(target);
                               }
+                              if (!mounted) return;
                               Navigator.pop(ctx);
                             },
                             child: const Text('Continue'),
@@ -461,7 +592,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
         setState(() => _phase = _Phase.shelf);
       } else {
         await _speak(
-            'All target items in aisle $_currentAisle are complete. You can move to the next aisle.');
+            'All target items in aisle $_currentAisleLabel are complete. You can move to the next aisle.');
         setState(() => _phase = _Phase.shelfResults);
       }
     } else {
@@ -486,6 +617,19 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       return;
     }
     _aisleOcrText = text;
+    if (!_looksLikeUsefulAisleText(text)) {
+      final preview = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+      setState(() {
+        _phase = _Phase.aisleSign;
+        _aisleStatusMessage = preview.isEmpty
+            ? 'No clear sign text detected. Retake aisle sign photo.'
+            : 'Sign text unclear: "$preview". Retake aisle sign photo.';
+      });
+      await _speak(
+          'This aisle sign image is unclear. Please go closer, hold steady, and retake the aisle sign photo.');
+      return;
+    }
+    _aisleStatusMessage = '';
     _aisleMatches = _matchItems(text);
     _pendingShelfItems = _aisleMatches.where((i) => !i.isChecked).toList();
     _shelfPromptIndex = 0;
@@ -495,22 +639,24 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     setState(() => _phase = _Phase.aisleResults);
     if (_aisleMatches.isEmpty) {
       await _speak(
-          'Aisle $_currentAisle scanned. No list items match this aisle. '
+          'Aisle $_currentAisleLabel scanned. No list items match this aisle. '
           'You can scan the shelf or move to the next aisle.');
     } else {
       final names = _aisleMatches.map((i) => i.name).join(', ');
       await _speak(
           '${_aisleMatches.length} item${_aisleMatches.length == 1 ? "" : "s"} found in list. Start shopping. '
-          'Aisle $_currentAisle items: $names.');
+          'Aisle $_currentAisleLabel items: $names.');
     }
   }
 
   Future<void> _onGoToShelf() async {
     setState(() {
       _phase = _Phase.shelf;
+      _aisleStatusMessage = '';
       _shelfOcrText = '';
       _shelfMatches = [];
       _shelfStatusMessage = '';
+      _vlmAnswer = '';
     });
     await _restartCamera();
     if (_pendingShelfItems.isNotEmpty) {
@@ -531,6 +677,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       bytes = await _capturePhoto();
     }
     if (bytes == null) return;
+    _lastShelfImageBytes = bytes;
     await _speak('Reading shelf text.');
 
     final shelfText = await _runOcr(bytes);
@@ -570,10 +717,13 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     });
 
     await _speak(_shelfStatusMessage);
-    if (target != null && targetFound) {
-      target.isChecked = true;
-    }
     if (target != null) {
+      if (!targetFound) {
+        await _speak(
+            'Go closer to the shelf and try scanning again until ${target.name} is detected.');
+        setState(() => _phase = _Phase.shelf);
+        return;
+      }
       await _promptShelfDecision(target);
       await _advanceAfterShelfDecision();
       return;
@@ -584,9 +734,11 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   Future<void> _onScanAnotherShelf() async {
     setState(() {
       _phase = _Phase.shelf;
+      _aisleStatusMessage = '';
       _shelfOcrText = '';
       _shelfMatches = [];
       _shelfStatusMessage = '';
+      _vlmAnswer = '';
     });
     await _restartCamera();
     if (_pendingShelfItems.isNotEmpty &&
@@ -601,25 +753,247 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   Future<void> _onNextAisle() async {
     setState(() {
       _currentAisle++;
+      _currentAisleLabel = _currentAisle.toString();
       _phase = _Phase.aisleSign;
       _aisleOcrText = '';
+      _aisleStatusMessage = '';
       _shelfOcrText = '';
       _aisleMatches = [];
       _shelfMatches = [];
       _shelfStatusMessage = '';
       _pendingShelfItems = [];
       _shelfPromptIndex = 0;
+      _vlmAnswer = '';
+      _lastShelfImageBytes = null;
     });
     await _restartCamera();
     await _speak(
-        'Moving to aisle $_currentAisle. Point at the aisle sign and tap Scan Aisle Sign.');
+        'Moving to aisle $_currentAisleLabel. Point at the aisle sign and tap Scan Aisle Sign.');
   }
 
   Future<void> _toggleItem(_Item item) async {
     setState(() => item.isChecked = !item.isChecked);
+    await _saveItemCheckedState(item);
     await _speak(item.isChecked
         ? '${item.name} checked off.'
         : '${item.name} unchecked.');
+  }
+
+  Future<void> _saveItemCheckedState(_Item item) async {
+    if (item.id.isEmpty) return;
+    try {
+      await supabase
+          .from('grocery_items')
+          .update({'is_checked': item.isChecked})
+          .eq('id', item.id)
+          .eq('list_id', widget.listId);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save "${item.name}".')),
+      );
+    }
+  }
+
+  Future<void> _saveAllProgress() async {
+    for (final item in _items) {
+      final initial = _initialCheckedById[item.id];
+      if (initial != null && initial != item.isChecked) {
+        await _saveItemCheckedState(item);
+      }
+    }
+  }
+
+  Future<void> _onEndShopping() async {
+    setState(() => _ocrLoading = true);
+    await _saveAllProgress();
+    if (!mounted) return;
+    setState(() => _ocrLoading = false);
+    Navigator.of(context).pop(true);
+  }
+
+  Future<void> _showAisleOverrideDialog() async {
+    final controller = TextEditingController(text: _currentAisleLabel);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Set Current Aisle'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.text,
+          decoration: const InputDecoration(
+            labelText: 'Aisle name or number',
+            hintText: 'Type aisle (e.g. dairy or 3)',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx, controller.text.trim());
+            },
+            child: const Text('Set Aisle'),
+          ),
+        ],
+      ),
+    );
+    if (value == null || value.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid aisle name or number.')),
+      );
+      return;
+    }
+    final numericMatch = RegExp(r'^\d+$').hasMatch(value);
+    if (numericMatch) {
+      final parsed = int.parse(value);
+      if (parsed <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter a valid aisle number.')),
+        );
+        return;
+      }
+      setState(() {
+        _currentAisle = parsed;
+        _currentAisleLabel = parsed.toString();
+        _phase = _Phase.aisleSign;
+        _aisleOcrText = '';
+        _aisleStatusMessage = '';
+        _shelfOcrText = '';
+        _shelfMatches = [];
+        _shelfStatusMessage = '';
+        _pendingShelfItems = [];
+        _shelfPromptIndex = 0;
+      });
+      await _restartCamera();
+      await _speak(
+          'Aisle set to $_currentAisleLabel. Point at the aisle sign and tap Scan Aisle Sign.');
+      return;
+    }
+
+    final aisleWords = _tokenize(value);
+    final matches = _items.where((item) {
+      if (item.isChecked) return false;
+      return _itemMatchesSign(item, aisleWords);
+    }).toList();
+
+    if (matches.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No list items match aisle "$value".')),
+      );
+      await _speak('No list items match aisle $value. Try another aisle name.');
+      return;
+    }
+
+    setState(() {
+      _currentAisleLabel = value;
+      _phase = _Phase.aisleResults;
+      _aisleOcrText = value;
+      _aisleStatusMessage = '';
+      _shelfOcrText = '';
+      _aisleMatches = matches;
+      _shelfMatches = [];
+      _shelfStatusMessage = '';
+      _pendingShelfItems = matches.where((i) => !i.isChecked).toList();
+      _shelfPromptIndex = 0;
+    });
+    for (final item in matches) {
+      item.aisle ??= _currentAisle;
+    }
+    final names = matches.map((e) => e.name).join(', ');
+    await _speak(
+        'Aisle $_currentAisleLabel selected. You have $names to find.');
+  }
+
+  Future<void> _autoAdvanceAfterManualCheckoff(_Item changedItem) async {
+    if (!changedItem.isChecked || _pendingShelfItems.isEmpty) return;
+    final remaining = _pendingShelfItems.where((i) => !i.isChecked).toList();
+    if (remaining.isEmpty) {
+      await _speak(
+          'Great. All target items in aisle $_currentAisleLabel are checked. Moving to next aisle.');
+      await _onNextAisle();
+      return;
+    }
+    final current = _currentShelfTarget;
+    if (current == null || current.isChecked) {
+      final nextIdx = _pendingShelfItems.indexWhere((i) => !i.isChecked);
+      if (nextIdx >= 0) {
+        setState(() {
+          _shelfPromptIndex = nextIdx;
+          _phase = _Phase.shelf;
+        });
+        await _speak(
+            'Next item in this aisle is ${_pendingShelfItems[nextIdx].name}.');
+      }
+    }
+  }
+
+  Future<void> _showQuickCheckoffSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) => Padding(
+            padding: const EdgeInsets.all(12),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.7,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    child: Text(
+                      'Check Off Grocery Items',
+                      style:
+                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: ListView(
+                      children: _items
+                          .map(
+                            (item) => CheckboxListTile(
+                              value: item.isChecked,
+                              onChanged: (v) async {
+                                if (v == null) return;
+                                setState(() => item.isChecked = v);
+                                setModalState(() {});
+                                await _saveItemCheckedState(item);
+                                await _autoAdvanceAfterManualCheckoff(item);
+                              },
+                              title: Text(item.name),
+                              subtitle: Text(item.category),
+                              controlAffinity: ListTileControlAffinity.leading,
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('Close'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _speak(String text) async {
@@ -639,15 +1013,37 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   @override
   Widget build(BuildContext context) {
     String title = _phase == _Phase.aisleSign
-        ? 'Aisle $_currentAisle — Scan Sign'
+        ? 'Aisle $_currentAisleLabel — Scan Sign'
         : _phase == _Phase.shelf
-            ? 'Aisle $_currentAisle — Scan Shelf'
-            : 'Aisle $_currentAisle';
+            ? 'Aisle $_currentAisleLabel — Scan Shelf'
+            : 'Aisle $_currentAisleLabel';
 
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
         actions: [
+          IconButton(
+            tooltip: 'End shopping',
+            icon: const Icon(Icons.stop_circle_outlined, size: 28),
+            onPressed: _ocrLoading ? null : _onEndShopping,
+          ),
+          IconButton(
+            tooltip: 'Try with VLM',
+            icon: const Icon(Icons.auto_awesome, size: 28),
+            onPressed: (_lastShelfImageBytes == null || _ocrLoading)
+                ? null
+                : _tryWithVlm,
+          ),
+          IconButton(
+            tooltip: 'Set aisle manually',
+            icon: const Icon(Icons.edit_location_alt, size: 28),
+            onPressed: _showAisleOverrideDialog,
+          ),
+          IconButton(
+            tooltip: 'Check off items',
+            icon: const Icon(Icons.checklist, size: 28),
+            onPressed: _showQuickCheckoffSheet,
+          ),
           IconButton(
             tooltip: _audioEnabled ? 'Mute audio' : 'Unmute audio',
             icon: Icon(_audioEnabled ? Icons.volume_up : Icons.volume_off,
@@ -835,6 +1231,24 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                           color: Color(0xFF00E5FF), fontSize: 16),
                     ),
                   ),
+                if (isAisle && _aisleStatusMessage.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFFFD54F)),
+                    ),
+                    child: Text(
+                      _aisleStatusMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Color(0xFFFFD54F), fontSize: 16),
+                    ),
+                  ),
                 Row(
                   children: [
                     Expanded(
@@ -913,7 +1327,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
           child: Text(
             _aisleMatches.isEmpty
                 ? 'No list items match this aisle'
-                : '${_aisleMatches.length} item${_aisleMatches.length == 1 ? "" : "s"} in aisle $_currentAisle:',
+                : '${_aisleMatches.length} item${_aisleMatches.length == 1 ? "" : "s"} in aisle $_currentAisleLabel:',
             style: const TextStyle(
                 fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white),
           ),

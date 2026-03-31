@@ -1,18 +1,32 @@
+import 'package:flutter/foundation.dart';
+
 /// Compile-time base URL for the OCR HTTP API (no trailing slash).
 ///
-/// Defaults to the MAGIC GPU server's direct IP.
 /// Override for local dev:
-/// `flutter run --dart-define=OCR_BASE_URL=http://localhost:5010`
-const String _kOcrBaseUrl = String.fromEnvironment(
-  'OCR_BASE_URL',
-  defaultValue: 'http://128.180.121.230:5010',
-);
+/// `flutter run -d chrome --dart-define=OCR_BASE_URL=http://localhost:5010`
+const String _kOcrBaseUrlEnv = String.fromEnvironment('OCR_BASE_URL');
+
+const String _kMagicDefaultBaseUrl = 'http://128.180.121.230:5010';
 
 String _trimTrailingSlash(String s) =>
     s.endsWith('/') ? s.substring(0, s.length - 1) : s;
 
+String _webDefaultBaseUrl() {
+  // When running Flutter web, default to the same host as the app (port 5010).
+  // This avoids "works on device but not in browser" issues due to CORS / LAN IPs.
+  final base = Uri.base;
+  final scheme = base.scheme.isEmpty ? 'http' : base.scheme;
+  final host = base.host.isEmpty ? 'localhost' : base.host;
+  return '$scheme://$host:5010';
+}
+
 /// Resolved base URL (no trailing slash).
-String ocrServiceBaseUrl() => _trimTrailingSlash(_kOcrBaseUrl);
+String ocrServiceBaseUrl() {
+  final trimmedEnv = _trimTrailingSlash(_kOcrBaseUrlEnv.trim());
+  if (trimmedEnv.isNotEmpty) return trimmedEnv;
+  final fallback = kIsWeb ? _webDefaultBaseUrl() : _kMagicDefaultBaseUrl;
+  return _trimTrailingSlash(fallback);
+}
 
 /// Both local and MAGIC servers use the same `/extract-text` route.
 String get ocrMultipartPath => '/extract-text';
@@ -24,5 +38,8 @@ Uri ocrMultipartUri() =>
 /// URI for saving the image to the MAGIC server's Images_2026 folder.
 Uri uploadUri() => Uri.parse('${ocrServiceBaseUrl()}/upload');
 
-/// URI for YOLOv8 object detection predictions.
-Uri predictUri() => Uri.parse('${ocrServiceBaseUrl()}/predict');
+/// URI for VLM predictions (image + question -> answer).
+Uri vlmPredictUri() => Uri.parse('${ocrServiceBaseUrl()}/predict');
+
+/// URI for YOLO object detections (image -> label list).
+Uri yoloDetectUri() => Uri.parse('${ocrServiceBaseUrl()}/detect-yolo');
