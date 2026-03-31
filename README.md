@@ -108,6 +108,7 @@ pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases
 
 ```bash
 pip install -r requirements.txt
+pip install flask easyocr ultralytics
 ```
 
 If `decord` or `av` fail:
