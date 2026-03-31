@@ -130,13 +130,7 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 ### Set environment variables
 
 ```bash
-export VLM_MODEL_NAME="Qwen/Qwen3-VL-2B-Instruct"
-export MAX_NEW_TOKENS=96
-export MAX_IMAGE_SIDE=768
-export SERIALIZE_VLM=1
-export OCR_GPU=0
-export YOLO_MODEL_PATH="best.pt"
-export RETURN_TRACEBACK=1
+export VLM_MODEL_NAME="Qwen/Qwen3-VL-2B-Instruct" MAX_NEW_TOKENS=96 MAX_IMAGE_SIDE=768 SERIALIZE_VLM=1 OCR_GPU=0 YOLO_MODEL_PATH="best.pt" RETURN_TRACEBACK=1
 ```
 
 ---
