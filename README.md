@@ -77,30 +77,32 @@ If needed, replace `cu128` (e.g., `cu121`).
 
 ---
 
-### (Optional) Install Flash Attention (before requirements)
+Here’s the **updated Flash Attention section** with your addition cleanly integrated:
 
-Try first:
+````markdown
+### ⚡ (Optional) Flash Attention
+
+Try installing Flash Attention first:
 
 ```bash
 pip install flash-attn --no-build-isolation
-```
+````
 
-If that fails, install a matching prebuilt wheel.
+If this does not work, you need to install a prebuilt wheel that matches your device:
 
-Example (CUDA 12.8 + PyTorch 2.8.0):
+👉 [https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/](https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/)
+
+Select the correct wheel based on:
+
+* CUDA version (e.g., `cu128`)
+* PyTorch version (e.g., `torch2.8`)
+* Python version (e.g., `cp310`)
+
+**Example (CUDA 12.8 + PyTorch 2.8.0):**
 
 ```bash
 pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3%2Bcu128torch2.8-cp310-cp310-linux_x86_64.whl
 ```
-
-⚠️ Must match:
-
-* CUDA (`cu128`)
-* PyTorch (`torch2.8`)
-* Python (`cp310`)
-
-If it still fails → skip it.
-
 ---
 
 ### Install remaining requirements
@@ -135,7 +137,7 @@ export VLM_MODEL_NAME="Qwen/Qwen3-VL-2B-Instruct"
 export MAX_NEW_TOKENS=96
 export MAX_IMAGE_SIDE=768
 export SERIALIZE_VLM=1
-export OCR_GPU=1
+export OCR_GPU=0
 export YOLO_MODEL_PATH="best.pt"
 export RETURN_TRACEBACK=1
 ```
