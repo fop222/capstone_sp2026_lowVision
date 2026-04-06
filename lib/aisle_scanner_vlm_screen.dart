@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
@@ -160,16 +161,23 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Listens for an aisle name. Uses [ListenMode.dictation] (not the default
-  /// short-phrase mode). On web, finals often arrive only after [stop], so we
-  /// always [stop] and take the latest partial text. [onPartial] updates UI.
+  /// Listens for an aisle name. On web, browser SpeechRecognition does not mark
+  /// results [finalResult] until after [stop]; we stop then wait briefly so the
+  /// plugin can promote the last partial. [onPartial] updates UI.
+  ///
+  /// Important: with both [listenFor] and [pauseFor], the plugin's first timer
+  /// uses **min** of the two—so pauseFor 5s ended listening ~5s after start even
+  /// when listenFor was 30s. That cut off speech right after TTS. Web uses
+  /// pauseFor: null so only listenFor limits the session.
   Future<String> _listenForSpokenAislePhrase({
     void Function(String partial)? onPartial,
   }) async {
     if (!_speechAvailable) return '';
 
     await _tts.stop();
-    await Future<void>.delayed(const Duration(milliseconds: 600));
+    await Future<void>.delayed(
+      Duration(milliseconds: kIsWeb ? 1400 : 600),
+    );
 
     var recognized = '';
     final done = Completer<void>();
@@ -186,38 +194,63 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
 
-      await _speech.listen(
-        onResult: (result) {
-          recognized = result.recognizedWords;
-          if (recognized.isNotEmpty) {
-            onPartial?.call(recognized);
-          }
-          if (result.finalResult) {
-            maybeFinish();
-          }
-        },
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 5),
-        listenOptions: SpeechListenOptions(
-          listenMode: ListenMode.dictation,
-          partialResults: true,
-          cancelOnError: false,
-        ),
-      );
+      try {
+        await _speech.listen(
+          onResult: (result) {
+            recognized = result.recognizedWords;
+            if (recognized.isNotEmpty) {
+              onPartial?.call(recognized);
+            }
+            if (result.finalResult) {
+              maybeFinish();
+            }
+          },
+          listenFor: Duration(seconds: kIsWeb ? 60 : 30),
+          pauseFor: kIsWeb ? null : const Duration(seconds: 8),
+          localeId: kIsWeb ? 'en-US' : null,
+          listenOptions: SpeechListenOptions(
+            listenMode:
+                kIsWeb ? ListenMode.confirmation : ListenMode.dictation,
+            partialResults: true,
+            cancelOnError: false,
+          ),
+        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Could not start speech listening: $e',
+                style: const TextStyle(fontSize: 16),
+              ),
+            ),
+          );
+        }
+        return '';
+      }
 
       await Future.any<void>([
         done.future,
         stopRequested.future,
-      ]).timeout(
-        const Duration(seconds: 20),
-        onTimeout: () {},
-      );
+        Future<void>.delayed(Duration(seconds: kIsWeb ? 62 : 32)),
+      ]);
+
+      if (_speech.isListening) {
+        await _speech.stop();
+      }
+
+      if (kIsWeb && !done.isCompleted) {
+        await Future.any<void>([
+          done.future,
+          Future<void>.delayed(const Duration(milliseconds: 2500)),
+        ]);
+      }
     } finally {
       _stopAisleListenRequested = null;
       if (_speech.isListening) {
         await _speech.stop();
       }
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(Duration(milliseconds: kIsWeb ? 800 : 400));
     }
 
     return recognized.trim();
@@ -1085,9 +1118,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Allow the microphone if your browser asks. You should '
-                        'see words appear as you speak. Tap Stop listening when '
-                        'you are done.',
+                        'Allow the microphone if your browser asks. Wait until '
+                        'the voice prompt finishes, then speak clearly—you should '
+                        'see words appear. On the web, you have up to about a '
+                        'minute; tap Stop listening when finished.',
                         style: TextStyle(fontSize: 17, color: Colors.white60),
                       ),
                     ],
