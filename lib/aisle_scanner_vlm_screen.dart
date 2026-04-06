@@ -349,6 +349,52 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     return RegExp(r'\bITEM FOUND\b').hasMatch(upper);
   }
 
+  /// Strips VLM footer phrases so the visible summary matches our [targetFound] logic.
+  String _vlmAnswerWithoutFoundTags(String answer) {
+    var s = answer.trim();
+    if (s.isEmpty) return s;
+    s = s.replaceAll(RegExp(r'\bITEM\s+NOT\s+FOUND\b', caseSensitive: false), '');
+    s = s.replaceAll(RegExp(r'\bITEM\s+FOUND\b', caseSensitive: false), '');
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    s = s.replaceAll(RegExp(r'^\s*[.,;:]\s*'), '').trim();
+    s = s.replaceAll(RegExp(r'\s*[.,;:]\s*$'), '').trim();
+    return s;
+  }
+
+  String _buildShelfStatusMessage({
+    required String vlmAnswer,
+    required String matchedNames,
+    required _Item? target,
+    required bool targetFound,
+  }) {
+    final cleaned = _vlmAnswerWithoutFoundTags(vlmAnswer);
+    final hasMatches = matchedNames.isNotEmpty;
+
+    if (target == null) {
+      if (!hasMatches) {
+        return cleaned.isEmpty
+            ? 'VLM detected: nothing clear.'
+            : 'VLM detected: $cleaned';
+      }
+      return cleaned.isEmpty
+          ? 'Detected list matches: $matchedNames'
+          : 'Detected list matches: $matchedNames. VLM: $cleaned';
+    }
+
+    final desc = cleaned.isEmpty
+        ? 'Could not describe the shelf clearly from the photo.'
+        : 'What we see: $cleaned';
+
+    final verdict = targetFound
+        ? 'For "${target.name}": this looks like a match.'
+        : 'For "${target.name}": not a match on this shelf—keep looking or scan again.';
+
+    if (!hasMatches) {
+      return '$desc\n\n$verdict';
+    }
+    return 'Shelf text matched your list: $matchedNames.\n\n$desc\n\n$verdict';
+  }
+
   bool _vlmAnswerMatchesTarget(String answer, _Item target) {
     final answerWords = _tokenize(answer);
     final targetWords = _tokenize(target.name);
@@ -595,15 +641,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         (targetOnShelfByOcr || !shelfMatchesOtherListItem);
 
     setState(() {
-      if (matchedNames.isEmpty) {
-        _shelfStatusMessage = vlmAnswer.isEmpty
-            ? 'VLM detected: nothing clear.'
-            : 'VLM detected: $vlmAnswer';
-      } else {
-        _shelfStatusMessage = vlmAnswer.isEmpty
-            ? 'Detected list matches: $matchedNames'
-            : 'Detected list matches: $matchedNames. VLM detected: $vlmAnswer';
-      }
+      _shelfStatusMessage = _buildShelfStatusMessage(
+        vlmAnswer: vlmAnswer,
+        matchedNames: matchedNames,
+        target: target,
+        targetFound: targetFound,
+      );
       _phase = _Phase.shelfResults;
     });
 
@@ -672,8 +715,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     required String itemName,
   }) async {
     final spokenPrompt = found
-        ? 'Item found. Do you want to check off item? Yes or no.'
-        : 'Item not found. Do you want to check off item? Yes or no.';
+        ? 'This looks like a match for $itemName. Do you want to check it off your list? Yes or no.'
+        : 'We do not think this shelf shows $itemName. Tap yes only if you still want to check it off your list anyway. Yes or no.';
     await _speak(spokenPrompt);
     if (!mounted) return null;
 
@@ -682,7 +725,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         title: Text(
-          found ? 'Item found' : 'Item not found',
+          found ? 'Looks like a match' : 'Not a match on this shelf',
           style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
         ),
         content: SingleChildScrollView(
@@ -695,9 +738,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Do you want to check off this item?',
-                style: TextStyle(fontSize: 24, height: 1.3),
+              Text(
+                found
+                    ? 'Do you want to check this item off your list?'
+                    : 'Tap Yes only if you already have $itemName or want to remove it from your list anyway. Tap No to keep shopping for it.',
+                style: const TextStyle(fontSize: 24, height: 1.3),
               ),
               const SizedBox(height: 24),
               Row(
