@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'main.dart';
 
@@ -33,59 +32,6 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
   final FlutterTts _tts = FlutterTts();
   final SpeechToText _speech = SpeechToText();
   bool _speechAvailable = false;
-
-  static const _categories = [
-    'Cereal',
-    'Hot cereal',
-    'Dry fruit',
-    'Fruit snacks',
-    'Juice',
-    'Baby food',
-    'Diapers',
-    'Sports drinks',
-    'Soda',
-    'Water',
-    'Snacks',
-    'Chips',
-    'Cookies',
-    'Crackers',
-    'Candy',
-    'Baking goods',
-    'Flour',
-    'Sugar',
-    'Oils',
-    'Pasta',
-    'Rice',
-    'Beans',
-    'International foods',
-    'Canned vegetables',
-    'Canned fruit',
-    'Soup',
-    'Condiments',
-    'Sauces',
-    'Spices',
-    'Coffee',
-    'Tea',
-    'Breakfast items',
-    'Frozen foods',
-    'Ice cream',
-    'Dairy',
-    'Milk',
-    'Eggs',
-    'Cheese',
-    'Yogurt',
-    'Deli',
-    'Meat',
-    'Seafood',
-    'Produce',
-    'Bread',
-    'Bakery',
-    'Paper goods',
-    'Cleaning supplies',
-    'Pet food',
-    'Health & beauty',
-    'Pharmacy items',
-  ];
 
   @override
   void initState() {
@@ -222,7 +168,7 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                   style: TextStyle(fontSize: 20)),
               subtitle: Text(
                   _speechAvailable
-                      ? 'Voice guided — TTS will ask you questions'
+                      ? 'Speak the item name, then type or speak any category you want'
                       : 'Not available in this browser',
                   style: const TextStyle(fontSize: 16)),
               enabled: _speechAvailable,
@@ -250,53 +196,58 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
 
   void _showManualAddDialog() {
     final nameController = TextEditingController();
-    String selectedCategory = _categories.first;
+    final categoryController = TextEditingController();
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Add item'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Item name',
-                  hintText: 'e.g. Apples',
-                ),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add item'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Item name',
+                hintText: 'e.g. Apples',
               ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: selectedCategory,
-                decoration: const InputDecoration(labelText: 'Category'),
-                items: _categories
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (v) {
-                  if (v != null) setDialogState(() => selectedCategory = v);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
             ),
-            ElevatedButton(
-              onPressed: () {
-                final name = nameController.text.trim();
-                if (name.isEmpty) return;
-                Navigator.pop(ctx);
-                _addItem(name, selectedCategory);
-              },
-              child: const Text('Add'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: categoryController,
+              decoration: const InputDecoration(
+                labelText: 'Category',
+                hintText: 'Type any category, e.g. Desserts, Dairy, Snacks',
+              ),
+              textCapitalization: TextCapitalization.words,
             ),
           ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final name = nameController.text.trim();
+              final category = categoryController.text.trim();
+              if (name.isEmpty) return;
+              if (category.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Enter a category (any name you like).'),
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(ctx);
+              _addItem(name, category);
+            },
+            child: const Text('Add'),
+          ),
+        ],
       ),
     );
   }
@@ -314,7 +265,6 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
       builder: (_) => _VoiceEntrySheet(
         tts: _tts,
         speech: _speech,
-        categories: _categories,
         onItemAdded: (name, category) => _addItem(name, category),
       ),
     );
@@ -454,13 +404,11 @@ enum _VoiceStep { name, category, done }
 class _VoiceEntrySheet extends StatefulWidget {
   final FlutterTts tts;
   final SpeechToText speech;
-  final List<String> categories;
   final void Function(String name, String category) onItemAdded;
 
   const _VoiceEntrySheet({
     required this.tts,
     required this.speech,
-    required this.categories,
     required this.onItemAdded,
   });
 
@@ -472,16 +420,28 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
   _VoiceStep _step = _VoiceStep.name;
   bool _isSpeaking = false;
   bool _isListening = false;
+  bool _listeningCategory = false;
   String _recognized = '';
   String _prompt = '';
   String _itemName = '';
-  String _itemCategory = '';
   bool _cancelled = false;
+
+  late final TextEditingController _categoryController;
 
   @override
   void initState() {
     super.initState();
+    _categoryController = TextEditingController();
+    _categoryController.addListener(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _runFlow());
+  }
+
+  @override
+  void dispose() {
+    _categoryController.dispose();
+    super.dispose();
   }
 
   // ── Flow ────────────────────────────────────────────────────────────────
@@ -504,23 +464,11 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
     if (!mounted || _cancelled) return;
     setState(() => _step = _VoiceStep.category);
 
-    // Step 2 — category
     await _speak(
-        'What category is $_itemName? Say one of the grocery categories in your list.');
-    if (_cancelled) return;
-
-    final catRaw = await _listenForWords();
-    if (_cancelled) return;
-
-    _itemCategory = _matchCategory(catRaw) ?? widget.categories.first;
-
-    // Step 3 — confirm and save
-    await _speak('Adding $_itemName to $_itemCategory.');
-    widget.onItemAdded(_itemName, _itemCategory);
-
-    if (!mounted || _cancelled) return;
-    setState(() => _step = _VoiceStep.done);
-    Navigator.pop(context);
+      'What category is $_itemName? Type your category in the box, or tap '
+      'the microphone to say it. You can use any category name. When ready, '
+      'tap Add to list.',
+    );
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -567,18 +515,70 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
     return result.trim();
   }
 
+  Future<void> _listenForCategoryField() async {
+    if (_cancelled || !mounted || _listeningCategory) return;
+    await widget.speech.stop();
+    _recognized = '';
+    setState(() => _listeningCategory = true);
+
+    final completer = Completer<String>();
+
+    await widget.speech.listen(
+      onResult: (result) {
+        if (mounted) setState(() => _recognized = result.recognizedWords);
+        if (result.finalResult && !completer.isCompleted) {
+          completer.complete(result.recognizedWords);
+        }
+      },
+      listenFor: const Duration(seconds: 10),
+      pauseFor: const Duration(seconds: 2),
+      cancelOnError: false,
+    );
+
+    final result = await completer.future.timeout(
+      const Duration(seconds: 13),
+      onTimeout: () {
+        widget.speech.stop();
+        return _recognized;
+      },
+    );
+
+    if (mounted) setState(() => _listeningCategory = false);
+    final trimmed = result.trim();
+    if (trimmed.isNotEmpty && mounted) {
+      _categoryController.text = _titleEachWord(trimmed);
+    }
+  }
+
+  Future<void> _confirmVoiceAdd() async {
+    final cat = _categoryController.text.trim();
+    if (cat.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please type or speak a category before adding.'),
+        ),
+      );
+      return;
+    }
+    if (_cancelled) return;
+    await _speak('Adding $_itemName to $cat.');
+    if (_cancelled) return;
+    widget.onItemAdded(_itemName, cat);
+    if (!mounted || _cancelled) return;
+    setState(() => _step = _VoiceStep.done);
+    Navigator.pop(context);
+  }
+
   String _capitalize(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
 
-  String? _matchCategory(String input) {
-    final lower = input.toLowerCase();
-    for (final cat in widget.categories) {
-      final words = cat.toLowerCase().split(RegExp(r'[\s&]+'));
-      for (final word in words) {
-        if (word.length > 2 && lower.contains(word)) return cat;
-      }
-    }
-    return null;
+  String _titleEachWord(String s) {
+    return s
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .map((p) => p[0].toUpperCase() + p.substring(1).toLowerCase())
+        .join(' ');
   }
 
   void _cancel() {
@@ -632,61 +632,135 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
               style: const TextStyle(
                   fontSize: 22, fontWeight: FontWeight.w600, color: Colors.white),
             ),
-            const SizedBox(height: 32),
-
-            // Animated mic / speaker icon
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: _isListening
-                  ? Column(
-                      key: const ValueKey('listening'),
-                      children: [
-                        const Icon(Icons.mic, size: 64, color: Color(0xFF00E5FF)),
-                        const SizedBox(height: 8),
-                        const Text('Listening…',
-                            style: TextStyle(
-                                color: Color(0xFF00E5FF),
-                                fontSize: 20,
-                                fontWeight: FontWeight.w600)),
-                        if (_recognized.isNotEmpty) ...[
-                          const SizedBox(height: 10),
-                          Text(
-                            '"$_recognized"',
-                            style: const TextStyle(
-                                fontStyle: FontStyle.italic,
-                                fontSize: 20,
-                                color: Colors.white70),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ],
-                    )
-                  : _isSpeaking
-                      ? const Column(
-                          key: ValueKey('speaking'),
-                          children: [
-                            Icon(Icons.volume_up,
-                                size: 64, color: Color(0xFFFFD54F)),
-                            SizedBox(height: 8),
-                            Text('Speaking…',
-                                style: TextStyle(
-                                    color: Color(0xFFFFD54F),
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600)),
-                          ],
-                        )
-                      : const Icon(
-                          key: ValueKey('idle'),
-                          Icons.hourglass_top,
-                          size: 64,
-                          color: Colors.white38,
-                        ),
-            ),
             const SizedBox(height: 24),
+
+            if (_step == _VoiceStep.name) ...[
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: _isListening
+                    ? Column(
+                        key: const ValueKey('listening'),
+                        children: [
+                          const Icon(Icons.mic,
+                              size: 64, color: Color(0xFF00E5FF)),
+                          const SizedBox(height: 8),
+                          const Text('Listening…',
+                              style: TextStyle(
+                                  color: Color(0xFF00E5FF),
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600)),
+                          if (_recognized.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Text(
+                              '"$_recognized"',
+                              style: const TextStyle(
+                                  fontStyle: FontStyle.italic,
+                                  fontSize: 20,
+                                  color: Colors.white70),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ],
+                      )
+                    : _isSpeaking
+                        ? const Column(
+                            key: ValueKey('speaking'),
+                            children: [
+                              Icon(Icons.volume_up,
+                                  size: 64, color: Color(0xFFFFD54F)),
+                              SizedBox(height: 8),
+                              Text('Speaking…',
+                                  style: TextStyle(
+                                      color: Color(0xFFFFD54F),
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          )
+                        : const Icon(
+                            key: ValueKey('idle'),
+                            Icons.hourglass_top,
+                            size: 64,
+                            color: Colors.white38,
+                          ),
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            if (_step == _VoiceStep.category) ...[
+              if (_listeningCategory) ...[
+                const Icon(Icons.mic, size: 56, color: Color(0xFF00E5FF)),
+                const SizedBox(height: 8),
+                const Text(
+                  'Listening for category…',
+                  style: TextStyle(
+                    color: Color(0xFF00E5FF),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_recognized.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '"$_recognized"',
+                    style: const TextStyle(
+                      fontStyle: FontStyle.italic,
+                      fontSize: 18,
+                      color: Colors.white70,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                const SizedBox(height: 16),
+              ],
+              TextField(
+                controller: _categoryController,
+                enabled: !_listeningCategory,
+                textCapitalization: TextCapitalization.words,
+                style: const TextStyle(fontSize: 20, color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Category',
+                  hintText: 'Type anything, e.g. Desserts, Coffee, Household',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  hintStyle: TextStyle(color: Colors.white38),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF00E5FF)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _listeningCategory || _isSpeaking
+                          ? null
+                          : _listenForCategoryField,
+                      icon: const Icon(Icons.mic_none),
+                      label: const Text('Speak category'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _listeningCategory || _isSpeaking
+                          ? null
+                          : _confirmVoiceAdd,
+                      child: const Text('Add to list'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Accumulated chips
             Wrap(
               spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
               children: [
                 if (_itemName.isNotEmpty)
                   Chip(
@@ -694,11 +768,11 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
                         size: 16, color: Colors.green),
                     label: Text('Item: $_itemName'),
                   ),
-                if (_itemCategory.isNotEmpty)
+                if (_categoryController.text.trim().isNotEmpty)
                   Chip(
                     avatar: const Icon(Icons.check_circle,
                         size: 16, color: Colors.green),
-                    label: Text('Category: $_itemCategory'),
+                    label: Text('Category: ${_categoryController.text.trim()}'),
                   ),
               ],
             ),
