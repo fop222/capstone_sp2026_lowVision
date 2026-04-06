@@ -3,7 +3,10 @@
 backup/
 EasyOCR/venv/
 venv/
+**/.venv/
+backend2/.venv/
 __pycache__/
+*.bak
 *.log
 *.pyc
 *.swp

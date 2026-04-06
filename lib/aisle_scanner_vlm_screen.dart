@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -6,7 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
+import 'grocery_list_detail_screen.dart';
 import 'main.dart';
 import 'ocr_config.dart';
 
@@ -35,6 +39,20 @@ class _Item {
 
 enum _Phase { aisleSign, aisleResults, shelf, shelfResults }
 
+const _kMenuEnd = 'end';
+const _kMenuAisle = 'aisle';
+const _kMenuMute = 'mute';
+const _kMenuList = 'list';
+
+const _shoppingMenuOrderDefault = [
+  _kMenuEnd,
+  _kMenuAisle,
+  _kMenuMute,
+  _kMenuList,
+];
+
+const _prefsVlmMenuOrder = 'vlm_shopping_menu_order_v1';
+
 class AisleScannerVlmScreen extends StatefulWidget {
   final String listId;
   final String listTitle;
@@ -61,7 +79,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   int _cameraIndex = 0;
 
   final FlutterTts _tts = FlutterTts();
+  final SpeechToText _speech = SpeechToText();
   final ImagePicker _picker = ImagePicker();
+  bool _speechAvailable = false;
+  Completer<void>? _stopAisleListenRequested;
 
   _Phase _phase = _Phase.aisleSign;
   int _currentAisle = 1;
@@ -75,8 +96,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   String _shelfOcrText = '';
   String _shelfStatusMessage = '';
   String _vlmAnswer = '';
-  Uint8List? _lastShelfImageBytes;
   String _lastSpoken = '';
+  bool _audioEnabled = true;
+  bool _shoppingMenuOpen = false;
+  bool _fullScreenListOpen = false;
+  bool _showAisleUnclearEmployeeOption = false;
+  List<String> _menuOrder = List<String>.from(_shoppingMenuOrderDefault);
 
   List<_Item> _aisleMatches = [];
   List<_Item> _shelfMatches = [];
@@ -84,7 +109,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   int _shelfPromptIndex = 0;
 
   late List<_Item> _items;
-  late final Map<String, bool> _initialCheckedById;
+  late Map<String, bool> _initialCheckedById;
 
   @override
   void initState() {
@@ -92,7 +117,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     _items = widget.items.map(_Item.fromMap).toList();
     _initialCheckedById = {for (final item in _items) item.id: item.isChecked};
     _tts.awaitSpeakCompletion(true);
+    _initSpeech();
     _initCamera();
+    _loadMenuOrder();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _speak(
         'VLM shopping mode started for ${widget.listTitle}. Point your camera at the aisle sign and tap Scan Aisle Sign.',
@@ -103,8 +130,97 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   @override
   void dispose() {
     _camera?.dispose();
+    _speech.stop();
     _tts.stop();
     super.dispose();
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      _speechAvailable = await _speech.initialize(
+        onError: (err) {
+          if (!mounted) return;
+          final msg = err.errorMsg;
+          if (msg.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Speech recognition: $msg',
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
+            );
+          }
+        },
+        onStatus: (_) {},
+      );
+    } catch (_) {
+      _speechAvailable = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Listens for an aisle name. Uses [ListenMode.dictation] (not the default
+  /// short-phrase mode). On web, finals often arrive only after [stop], so we
+  /// always [stop] and take the latest partial text. [onPartial] updates UI.
+  Future<String> _listenForSpokenAislePhrase({
+    void Function(String partial)? onPartial,
+  }) async {
+    if (!_speechAvailable) return '';
+
+    await _tts.stop();
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+
+    var recognized = '';
+    final done = Completer<void>();
+    final stopRequested = Completer<void>();
+    _stopAisleListenRequested = stopRequested;
+
+    void maybeFinish() {
+      if (!done.isCompleted) done.complete();
+    }
+
+    try {
+      if (_speech.isListening) {
+        await _speech.stop();
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+
+      await _speech.listen(
+        onResult: (result) {
+          recognized = result.recognizedWords;
+          if (recognized.isNotEmpty) {
+            onPartial?.call(recognized);
+          }
+          if (result.finalResult) {
+            maybeFinish();
+          }
+        },
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 5),
+        listenOptions: SpeechListenOptions(
+          listenMode: ListenMode.dictation,
+          partialResults: true,
+          cancelOnError: false,
+        ),
+      );
+
+      await Future.any<void>([
+        done.future,
+        stopRequested.future,
+      ]).timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {},
+      );
+    } finally {
+      _stopAisleListenRequested = null;
+      if (_speech.isListening) {
+        await _speech.stop();
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+
+    return recognized.trim();
   }
 
   Future<void> _initCamera() async {
@@ -347,6 +463,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _showAisleUnclearEmployeeOption = false;
     });
 
     await _speak('Reading aisle sign.');
@@ -356,7 +473,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     setState(() => _loading = false);
 
     if (text == null) {
-      await _speak('Could not read the sign. Please try again.');
+      setState(() => _showAisleUnclearEmployeeOption = true);
+      await _speak(
+        'Could not read the sign. You can try again, or tap Get Help from store employee.',
+      );
       return;
     }
 
@@ -365,13 +485,16 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (!_looksLikeUsefulAisleText(text)) {
       setState(() {
         _phase = _Phase.aisleSign;
-        _aisleStatusMessage = 'Sign text unclear. Retake aisle sign photo.';
+        _aisleStatusMessage = 'Sign text unclear. Retake photo or get employee help.';
+        _showAisleUnclearEmployeeOption = true;
       });
       await _speak(
-        'This aisle sign image is unclear. Please go closer and retake the photo.',
+        'This aisle sign is unclear. Try a closer photo, or tap Get Help from store employee.',
       );
       return;
     }
+
+    setState(() => _showAisleUnclearEmployeeOption = false);
 
     _aisleMatches = _matchItems(text);
     _pendingShelfItems = _aisleMatches.where((i) => !i.isChecked).toList();
@@ -416,7 +539,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final Uint8List? bytes =
         fromGallery ? await _pickFromGallery() : await _capturePhoto();
     if (bytes == null) return;
-    _lastShelfImageBytes = bytes;
 
     setState(() {
       _loading = true;
@@ -474,48 +596,122 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     await _speak(_shelfStatusMessage);
 
-    if (target != null && targetFound) {
-      setState(() {
-        target.isChecked = true;
-      });
-      await _saveItemCheckedState(target);
-      await _speak('Item found. ${target.name} checked off.');
+    if (target != null) {
+      if (!mounted) return;
+      final wantCheck = await _showCheckOffItemDialog(
+        found: targetFound,
+        itemName: target.name,
+      );
+      if (!mounted) return;
+      if (wantCheck == true) {
+        setState(() => target.isChecked = true);
+        await _saveItemCheckedState(target);
+        await _speak('${target.name} checked off.');
+      } else if (wantCheck == false) {
+        await _speak('Okay. ${target.name} is still on your list.');
+      }
+      if (targetFound) {
+        await _speak('Go to the next aisle and scan.');
+      } else {
+        await _speak('Scan aisle again.');
+      }
     }
   }
 
-  Future<void> _onTryWithVlm() async {
-    final bytes = _lastShelfImageBytes;
-    if (bytes == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Scan or upload a shelf image first.')),
-      );
-      return;
-    }
+  /// Large “textbox” style tap targets for Yes / No (accessibility).
+  Widget _checkOffAnswerBox({
+    required String label,
+    required VoidCallback onTap,
+    required Color borderColor,
+  }) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E2C),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: borderColor, width: 3),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-    final target = _currentShelfTarget;
-    final question = target != null
-        ? 'Do NOT read any text, labels, or signs. Use only visual appearance. '
-            'First, describe what grocery item you see concisely (1–2 sentences). '
-            'Then, say whether the described item matches "${target.name}". '
-            'If it matches, end with: ITEM FOUND.'
-        : 'Do NOT read any text, labels, or signs. Use only visual appearance. '
-            'Describe the main grocery item(s) you see concisely for a low-vision user.';
+  Future<bool?> _showCheckOffItemDialog({
+    required bool found,
+    required String itemName,
+  }) async {
+    final spokenPrompt = found
+        ? 'Item found. Do you want to check off item? Yes or no.'
+        : 'Item not found. Do you want to check off item? Yes or no.';
+    await _speak(spokenPrompt);
+    if (!mounted) return null;
 
-    setState(() => _loading = true);
-    final answer = await _runVlmPredict(bytes, question: question);
-    setState(() {
-      _loading = false;
-      _vlmAnswer = answer.isEmpty ? 'No VLM answer returned.' : answer;
-    });
-
-    if (target != null &&
-        (_vlmSaysItemFound(answer) ||
-            _vlmAnswerMatchesTarget(answer, target))) {
-      setState(() => target.isChecked = true);
-      await _saveItemCheckedState(target);
-      await _speak('Item found. ${target.name} checked off.');
-    }
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          found ? 'Item found' : 'Item not found',
+          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Looking for: $itemName',
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Do you want to check off this item?',
+                style: TextStyle(fontSize: 24, height: 1.3),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _checkOffAnswerBox(
+                      label: 'Yes',
+                      borderColor: const Color(0xFF00E5FF),
+                      onTap: () => Navigator.pop(ctx, true),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _checkOffAnswerBox(
+                      label: 'No',
+                      borderColor: const Color(0xFFFFD54F),
+                      onTap: () => Navigator.pop(ctx, false),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _onNextAisle() async {
@@ -532,6 +728,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       _shelfMatches = [];
       _pendingShelfItems = [];
       _shelfPromptIndex = 0;
+      _showAisleUnclearEmployeeOption = false;
     });
 
     await _restartCamera();
@@ -545,6 +742,541 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     await _saveItemCheckedState(item);
     await _speak(
       item.isChecked ? '${item.name} checked off.' : '${item.name} unchecked.',
+    );
+  }
+
+  Future<void> _reloadItemsFromServer() async {
+    try {
+      final rows = await supabase
+          .from('grocery_items')
+          .select()
+          .eq('list_id', widget.listId)
+          .order('name');
+      if (!mounted) return;
+      final list = List<Map<String, dynamic>>.from(rows);
+      setState(() {
+        _items = list.map(_Item.fromMap).toList();
+        _initialCheckedById = {
+          for (final item in _items) item.id: item.isChecked,
+        };
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not refresh list: $e')),
+      );
+    }
+  }
+
+  Future<void> _openAddItemsFromDrawer() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => GroceryListDetailScreen(
+          listId: widget.listId,
+          listTitle: widget.listTitle,
+        ),
+      ),
+    );
+    if (mounted) await _reloadItemsFromServer();
+  }
+
+  Future<void> _loadMenuOrder() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsVlmMenuOrder);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      var parsed = decoded.map((e) => e.toString()).toList();
+      parsed.removeWhere((k) => k == 'check');
+      if (parsed.length != _shoppingMenuOrderDefault.length) return;
+      if (parsed.toSet().length != _shoppingMenuOrderDefault.length) return;
+      for (final k in parsed) {
+        if (!_shoppingMenuOrderDefault.contains(k)) return;
+      }
+      if (mounted) setState(() => _menuOrder = parsed);
+    } catch (_) {}
+  }
+
+  Future<void> _saveMenuOrder() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsVlmMenuOrder, jsonEncode(_menuOrder));
+    } catch (_) {}
+  }
+
+  void _scheduleCameraResumeIfInCameraPhase() {
+    if (_phase != _Phase.aisleSign && _phase != _Phase.shelf) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _restartCamera();
+    });
+  }
+
+  void _closeShoppingMenuWithCameraResume() {
+    if (!_shoppingMenuOpen) return;
+    setState(() => _shoppingMenuOpen = false);
+    _scheduleCameraResumeIfInCameraPhase();
+  }
+
+  Future<void> _applyAisleValueFromString(String raw) async {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Type or say an aisle name (for example: dairy or bakery).',
+            style: TextStyle(fontSize: 18),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final aisleWords = _tokenize(value);
+    final matches = _items.where((item) {
+      if (item.isChecked) return false;
+      return _itemMatchesText(item, aisleWords);
+    }).toList();
+
+    if (matches.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No list items match "$value". Try another aisle name.',
+            style: const TextStyle(fontSize: 18),
+          ),
+        ),
+      );
+      await _speak('No list items match $value. Try another aisle name.');
+      return;
+    }
+
+    setState(() {
+      _currentAisleLabel = value;
+      _phase = _Phase.aisleResults;
+      _aisleOcrText = value;
+      _aisleStatusMessage = '';
+      _shelfOcrText = '';
+      _aisleMatches = matches;
+      _shelfMatches = [];
+      _shelfStatusMessage = '';
+      _pendingShelfItems = matches.where((i) => !i.isChecked).toList();
+      _shelfPromptIndex = 0;
+      _showAisleUnclearEmployeeOption = false;
+    });
+    for (final item in matches) {
+      item.aisle ??= _currentAisle;
+    }
+    final names = matches.map((e) => e.name).join(', ');
+    await _speak(
+      'Aisle $_currentAisleLabel selected. You have $names to find. Open the menu for your full list.',
+    );
+  }
+
+  Future<void> _showSpokenAisleSheet({required bool employeeMode}) async {
+    if (!mounted) return;
+
+    final typeController = TextEditingController();
+    var transcript = '';
+    var listening = false;
+
+    String combinedValue() {
+      final typed = typeController.text.trim();
+      if (typed.isNotEmpty) return typed;
+      return transcript.trim();
+    }
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setModal) {
+            final hasValue = combinedValue().isNotEmpty;
+            return AlertDialog(
+              title: Text(
+                employeeMode
+                    ? 'Store employee: aisle name'
+                    : 'Aisle name',
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (employeeMode) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0xFF00E5FF),
+                            width: 2,
+                          ),
+                        ),
+                        child: const Text(
+                          'FOR STORE EMPLOYEE\n\n'
+                          'Please look at this screen. The shopper needs the '
+                          'aisle location.\n\n'
+                          'Type the aisle name below, or tap the microphone and '
+                          'clearly say the aisle name you are in (for example: '
+                          '"Bakery" or "Dairy"). That name will be set in the app.',
+                          style: TextStyle(
+                            fontSize: 22,
+                            height: 1.35,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ] else ...[
+                      const Text(
+                        'Type the aisle name, or tap the microphone and say it '
+                        '(for example: "dairy" or "bakery"). Names only—no aisle '
+                        'numbers.',
+                        style: TextStyle(fontSize: 22, height: 1.3),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    TextField(
+                      controller: typeController,
+                      style: const TextStyle(fontSize: 22),
+                      decoration: const InputDecoration(
+                        labelText: 'Type aisle name',
+                        hintText: 'e.g. dairy, bakery, produce',
+                        labelStyle: TextStyle(fontSize: 20),
+                        hintStyle: TextStyle(fontSize: 18),
+                      ),
+                      textCapitalization: TextCapitalization.words,
+                      onChanged: (_) => setModal(() {}),
+                    ),
+                    const SizedBox(height: 20),
+                    if (!_speechAvailable)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          'Speech is not available here—use the text box above.',
+                          style: TextStyle(fontSize: 18, color: Colors.white70),
+                        ),
+                      ),
+                    FilledButton.icon(
+                      icon: Icon(
+                        listening ? Icons.mic : Icons.mic_none,
+                        size: 32,
+                      ),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 16,
+                          horizontal: 20,
+                        ),
+                        textStyle: const TextStyle(fontSize: 22),
+                      ),
+                      onPressed: (!_speechAvailable || listening)
+                          ? null
+                          : () async {
+                              setModal(() {
+                                listening = true;
+                                transcript = '';
+                              });
+                              await _speak(
+                                employeeMode
+                                    ? 'Employee, please say the aisle name now.'
+                                    : 'Say the aisle name now.',
+                              );
+                              final heard = await _listenForSpokenAislePhrase(
+                                onPartial: (w) {
+                                  if (ctx.mounted) {
+                                    setModal(() => transcript = w);
+                                  }
+                                },
+                              );
+                              if (ctx.mounted) {
+                                setModal(() {
+                                  listening = false;
+                                  transcript = heard;
+                                });
+                              }
+                            },
+                      label: Text(
+                        listening ? 'Listening…' : 'Tap microphone to speak',
+                      ),
+                    ),
+                    if (listening) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: () async {
+                          final c = _stopAisleListenRequested;
+                          if (c != null && !c.isCompleted) {
+                            c.complete();
+                          }
+                          await _speech.stop();
+                        },
+                        child: const Text(
+                          'Stop listening',
+                          style: TextStyle(fontSize: 20),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Allow the microphone if your browser asks. You should '
+                        'see words appear as you speak. Tap Stop listening when '
+                        'you are done.',
+                        style: TextStyle(fontSize: 17, color: Colors.white60),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text(
+                      transcript.isEmpty
+                          ? 'Heard text will appear here.'
+                          : 'Heard: $transcript',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: transcript.isEmpty
+                            ? FontWeight.w400
+                            : FontWeight.w700,
+                        color:
+                            transcript.isEmpty ? Colors.white54 : Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel', style: TextStyle(fontSize: 20)),
+                ),
+                FilledButton(
+                  onPressed: !hasValue
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          _applyAisleValueFromString(combinedValue());
+                        },
+                  child:
+                      const Text('Use this aisle', style: TextStyle(fontSize: 20)),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    } finally {
+      final c = _stopAisleListenRequested;
+      if (c != null && !c.isCompleted) {
+        c.complete();
+      }
+      if (_speech.isListening) {
+        await _speech.stop();
+      }
+      typeController.dispose();
+    }
+  }
+
+  Future<void> _openSayAisleFromMenu() async {
+    _closeShoppingMenuWithCameraResume();
+    await _showSpokenAisleSheet(employeeMode: false);
+  }
+
+  void _openEmployeeAisleHelp() {
+    _showSpokenAisleSheet(employeeMode: true);
+  }
+
+  void _openFullScreenListFromMenu() {
+    setState(() {
+      _shoppingMenuOpen = false;
+      _fullScreenListOpen = true;
+    });
+  }
+
+  void _closeFullScreenList() {
+    setState(() => _fullScreenListOpen = false);
+    _scheduleCameraResumeIfInCameraPhase();
+  }
+
+  Widget _largeMenuButton({
+    required String label,
+    required String semanticLabel,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: SizedBox(
+        width: double.infinity,
+        height: 88,
+        child: FilledButton(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            textStyle: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 36),
+              const SizedBox(width: 20),
+              Expanded(child: Text(label, maxLines: 2)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _menuActionBodyForId(String id) {
+    switch (id) {
+      case _kMenuEnd:
+        return _largeMenuButton(
+          label: 'End shopping',
+          semanticLabel: 'End shopping and save progress',
+          icon: Icons.stop_circle_outlined,
+          onPressed: _loading
+              ? null
+              : () {
+                  setState(() => _shoppingMenuOpen = false);
+                  _onEndShopping();
+                },
+        );
+      case _kMenuAisle:
+        return _largeMenuButton(
+          label: 'Set aisle name',
+          semanticLabel: 'Type or speak the aisle name (no aisle numbers)',
+          icon: Icons.mic,
+          onPressed: _loading ? null : _openSayAisleFromMenu,
+        );
+      case _kMenuMute:
+        return _largeMenuButton(
+          label: _audioEnabled ? 'Mute audio' : 'Unmute audio',
+          semanticLabel: _audioEnabled
+              ? 'Mute spoken feedback'
+              : 'Turn spoken feedback back on',
+          icon: _audioEnabled ? Icons.volume_up : Icons.volume_off,
+          onPressed: () {
+            setState(() => _audioEnabled = !_audioEnabled);
+            if (!_audioEnabled) _tts.stop();
+          },
+        );
+      case _kMenuList:
+        return _largeMenuButton(
+          label: 'Shopping list & check off',
+          semanticLabel:
+              'Open full screen shopping list, check off items, and add items',
+          icon: Icons.checklist,
+          onPressed: _openFullScreenListFromMenu,
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildShoppingMenuRow(int index, String id) {
+    return Card(
+      key: ValueKey(id),
+      margin: const EdgeInsets.only(bottom: 4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: _menuActionBodyForId(id)),
+            ReorderableDragStartListener(
+              index: index,
+              child: Semantics(
+                label: 'Drag to reorder this menu option',
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Icon(Icons.drag_handle, size: 40),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAccessibilityShoppingMenu(BuildContext context) {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      color: theme.colorScheme.surface,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Shopping menu',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontSize: 34,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.listTitle,
+                style: theme.textTheme.titleLarge?.copyWith(fontSize: 22),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Use the grip icon on the right to drag options into any order. '
+                'Your order is saved for next time.',
+                style: theme.textTheme.bodyLarge?.copyWith(fontSize: 20),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ReorderableListView.builder(
+                  padding: EdgeInsets.zero,
+                  buildDefaultDragHandles: false,
+                  itemCount: _menuOrder.length,
+                  onReorder: (oldIndex, newIndex) {
+                    setState(() {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      final x = _menuOrder.removeAt(oldIndex);
+                      _menuOrder.insert(newIndex, x);
+                    });
+                    _saveMenuOrder();
+                  },
+                  itemBuilder: (context, index) {
+                    return _buildShoppingMenuRow(index, _menuOrder[index]);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 72,
+                child: OutlinedButton(
+                  onPressed: _closeShoppingMenuWithCameraResume,
+                  style: OutlinedButton.styleFrom(
+                    textStyle: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  child: const Text('Resume shopping'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -587,41 +1319,80 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     } else {
       _lastSpoken = text;
     }
+    if (!_audioEnabled || !mounted) return;
     await _tts.speak(text);
   }
 
-  Widget _spokenPanel(BuildContext context) {
-    final spoken = _lastSpoken.trim();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Speaking:',
-            style: Theme.of(context).textTheme.titleMedium,
+  /// Colorful “Menu” control with explicit size so AppBar actions lay out on web
+  /// (InputDecorator inside unbounded Ink caused layout / hit-test exceptions).
+  Widget _shoppingMenuAppBarControl(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 10, top: 4, bottom: 4),
+      child: Tooltip(
+        message: 'Open shopping menu',
+        child: Semantics(
+          button: true,
+          label: 'Menu, open shopping menu',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => setState(() => _shoppingMenuOpen = true),
+              borderRadius: BorderRadius.circular(14),
+              child: Ink(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: const LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      Color(0xFF00E5FF),
+                      Color(0xFF26C6DA),
+                      Color(0xFFFFD54F),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    width: 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF00E5FF).withValues(alpha: 0.4),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxHeight: 42,
+                    minWidth: 72,
+                    maxWidth: 104,
+                  ),
+                  child: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.center,
+                    child: Padding(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: Text(
+                        'Menu',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.black,
+                          letterSpacing: 0.3,
+                          height: 1.1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            spoken.isEmpty ? '—' : spoken,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-          ),
-        ],
+        ),
       ),
     );
-  }
-
-  List<_Item> get _uncheckedSorted {
-    final withAisle = _items.where((i) => !i.isChecked && i.aisle != null).toList()
-      ..sort((a, b) => a.aisle!.compareTo(b.aisle!));
-    final noAisle = _items.where((i) => !i.isChecked && i.aisle == null).toList();
-    return [...withAisle, ...noAisle];
   }
 
   @override
@@ -632,27 +1403,134 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             ? 'VLM Aisle $_currentAisleLabel — Scan Shelf'
             : 'VLM Aisle $_currentAisleLabel';
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        actions: [
-          IconButton(
-            tooltip: 'End shopping',
-            icon: const Icon(Icons.stop_circle_outlined),
-            onPressed: _loading ? null : _onEndShopping,
+    return PopScope(
+      canPop: !_shoppingMenuOpen && !_fullScreenListOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_fullScreenListOpen) {
+          _closeFullScreenList();
+          return;
+        }
+        _closeShoppingMenuWithCameraResume();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            _fullScreenListOpen
+                ? 'Shopping list'
+                : _shoppingMenuOpen
+                    ? 'Menu'
+                    : title,
           ),
-          IconButton(
-            icon: const Icon(Icons.list_alt),
-            onPressed: () => Scaffold.of(context).openEndDrawer(),
-          ),
-        ],
+          leading: _fullScreenListOpen
+              ? IconButton(
+                  tooltip: 'Close list',
+                  icon: const Icon(Icons.close),
+                  onPressed: _closeFullScreenList,
+                )
+              : _shoppingMenuOpen
+                  ? IconButton(
+                      tooltip: 'Close menu',
+                      icon: const Icon(Icons.close),
+                      onPressed: _closeShoppingMenuWithCameraResume,
+                    )
+                  : null,
+          automaticallyImplyLeading:
+              !_shoppingMenuOpen && !_fullScreenListOpen,
+          actions: [
+            if (!_shoppingMenuOpen && !_fullScreenListOpen)
+              _shoppingMenuAppBarControl(context),
+          ],
+        ),
+        body: _shoppingMenuOpen
+            ? _buildAccessibilityShoppingMenu(context)
+            : _fullScreenListOpen
+                ? _buildFullScreenShoppingList()
+                : _phase == _Phase.aisleSign || _phase == _Phase.shelf
+                    ? _buildCameraView()
+                    : _phase == _Phase.aisleResults
+                        ? _buildAisleResults()
+                        : _buildShelfResults(),
       ),
-      endDrawer: _buildListDrawer(),
-      body: _phase == _Phase.aisleSign || _phase == _Phase.shelf
-          ? _buildCameraView()
-          : _phase == _Phase.aisleResults
-              ? _buildAisleResults()
-              : _buildShelfResults(),
+    );
+  }
+
+  Widget _buildFullScreenShoppingList() {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      color: theme.colorScheme.surface,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                widget.listTitle,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Tap items to check them off. Use Add items for more.',
+                style: theme.textTheme.bodyLarge?.copyWith(fontSize: 22),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 56,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.add_shopping_cart, size: 28),
+                  label: const Text(
+                    'Add items',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                  ),
+                  onPressed: _openAddItemsFromDrawer,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ListView(
+                  children: _items
+                      .map(
+                        (item) => CheckboxListTile(
+                          value: item.isChecked,
+                          onChanged: (_) => _toggleItem(item),
+                          title: Text(
+                            item.name,
+                            style: const TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: Text(
+                            item.category,
+                            style: const TextStyle(fontSize: 20),
+                          ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 56,
+                child: OutlinedButton(
+                  onPressed: _closeFullScreenList,
+                  style: OutlinedButton.styleFrom(
+                    textStyle: const TextStyle(fontSize: 22),
+                  ),
+                  child: const Text('Back to shopping'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -745,6 +1623,22 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   ),
                 ],
               ),
+              if (isAisle && _showAisleUnclearEmployeeOption) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 56,
+                  child: FilledButton(
+                    onPressed: _openEmployeeAisleHelp,
+                    style: FilledButton.styleFrom(
+                      textStyle: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: const Text('Get Help from store employee'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -754,44 +1648,67 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   Widget _buildAisleResults() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _spokenPanel(context),
-          const SizedBox(height: 16),
           Text(
             _aisleStatusMessage,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 16),
-          Expanded(
-            child: ListView(
-              children: _aisleMatches
-                  .map(
-                    (item) => CheckboxListTile(
-                      value: item.isChecked,
-                      onChanged: (_) => _toggleItem(item),
-                      title: Text(item.name),
-                      subtitle: Text(item.category),
-                    ),
-                  )
-                  .toList(),
-            ),
+          const Text(
+            'Open the Menu for your full shopping list and to check items off.',
+            style: TextStyle(fontSize: 22, height: 1.35),
           ),
+          if (_aisleMatches.isEmpty) ...[
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 56,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  textStyle: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                onPressed: () => _showSpokenAisleSheet(employeeMode: false),
+                child: const Text('Get Help from store employee'),
+              ),
+            ),
+          ],
+          const Spacer(),
           Row(
             children: [
               Expanded(
-                child: ElevatedButton(
-                  onPressed: _onGoToShelf,
-                  child: const Text('Go To Shelf Scan'),
+                child: SizedBox(
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _onGoToShelf,
+                    style: ElevatedButton.styleFrom(
+                      textStyle: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: const Text('Go To Shelf Scan'),
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
-                child: OutlinedButton(
-                  onPressed: _onNextAisle,
-                  child: const Text('Next Aisle'),
+                child: SizedBox(
+                  height: 56,
+                  child: OutlinedButton(
+                    onPressed: _onNextAisle,
+                    style: OutlinedButton.styleFrom(
+                      textStyle: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: const Text('Next Aisle'),
+                  ),
                 ),
               ),
             ],
@@ -803,87 +1720,58 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   Widget _buildShelfResults() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: ListView(
-              children: [
-                _spokenPanel(context),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: _loading ? null : _onTryWithVlm,
-                  icon: const Icon(Icons.auto_awesome),
-                  label: const Text('Try with VLM'),
-                ),
-                const SizedBox(height: 16),
-                ..._uncheckedSorted.map(
-                  (item) => CheckboxListTile(
-                    value: item.isChecked,
-                    onChanged: (_) => _toggleItem(item),
-                    title: Text(item.name),
-                    subtitle: Text(item.category),
-                  ),
-                ),
-              ],
-            ),
+          Text(
+            _shelfStatusMessage.isEmpty
+                ? 'Scan complete. Open the Menu for your list.'
+                : _shelfStatusMessage,
+            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 16),
+          const Text(
+            'Use the Menu to see all items and check them off.',
+            style: TextStyle(fontSize: 22, height: 1.35),
+          ),
+          const Spacer(),
           Row(
             children: [
               Expanded(
-                child: ElevatedButton(
-                  onPressed: _onGoToShelf,
-                  child: const Text('Scan Another Shelf'),
+                child: SizedBox(
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _onGoToShelf,
+                    style: ElevatedButton.styleFrom(
+                      textStyle: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: const Text('Scan Another Shelf'),
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
-                child: OutlinedButton(
-                  onPressed: _onNextAisle,
-                  child: const Text('Next Aisle'),
+                child: SizedBox(
+                  height: 56,
+                  child: OutlinedButton(
+                    onPressed: _onNextAisle,
+                    style: OutlinedButton.styleFrom(
+                      textStyle: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: const Text('Next Aisle'),
+                  ),
                 ),
               ),
             ],
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildListDrawer() {
-    return Drawer(
-      child: SafeArea(
-        child: Column(
-          children: [
-            ListTile(
-              title: Text(
-                widget.listTitle,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
-                ),
-              ),
-              subtitle: const Text('Shopping list'),
-            ),
-            const Divider(),
-            Expanded(
-              child: ListView(
-                children: _items
-                    .map(
-                      (item) => CheckboxListTile(
-                        value: item.isChecked,
-                        onChanged: (_) => _toggleItem(item),
-                        title: Text(item.name),
-                        subtitle: Text(item.category),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

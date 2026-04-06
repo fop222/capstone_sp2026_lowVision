@@ -52,6 +52,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Low Vision Daily Companion',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: _colorScheme,
         useMaterial3: true,

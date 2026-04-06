@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'main.dart';
+import 'take_picture_screen.dart';
 import 'grocery_list_detail_screen.dart';
 import 'supabase_auth_screen.dart';
-import 'take_picture_screen.dart';
-import 'aisle_scanner_screen.dart';
 import 'aisle_scanner_vlm_screen.dart';
 import 'profile_setup_screen.dart';
 
@@ -150,13 +149,6 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
             ),
           ),
           IconButton(
-            tooltip: 'Go to object-detection camera',
-            icon: const Icon(Icons.camera_alt, size: 28),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const TakePictureScreen()),
-            ),
-          ),
-          IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout, size: 28),
             onPressed: _signOut,
@@ -245,43 +237,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   IconButton(
-                                    tooltip: 'Start shopping',
-                                    icon: Icon(Icons.shopping_cart,
-                                        size: 28,
-                                        color: theme.colorScheme.secondary),
-                                    onPressed: () async {
-                                      try {
-                                        final items = await supabase
-                                            .from('grocery_items')
-                                            .select()
-                                            .eq('list_id', listId)
-                                            .order('name');
-                                        if (!context.mounted) return;
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => AisleScannerScreen(
-                                              listId: listId,
-                                              listTitle: listTitle,
-                                              items:
-                                                  List<Map<String, dynamic>>.from(
-                                                      items),
-                                            ),
-                                          ),
-                                        );
-                                      } catch (e) {
-                                        if (!context.mounted) return;
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(
-                                              content: Text(
-                                                  'Error loading items: $e')),
-                                        );
-                                      }
-                                    },
-                                  ),
-                                  IconButton(
                                     tooltip: 'Start shopping (VLM)',
-                                    icon: Icon(Icons.auto_awesome,
+                                    icon: Icon(Icons.shopping_cart,
                                         size: 28,
                                         color: theme.colorScheme.secondary),
                                     onPressed: () async {
