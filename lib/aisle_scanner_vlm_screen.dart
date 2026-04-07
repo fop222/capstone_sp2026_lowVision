@@ -439,6 +439,28 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     return false;
   }
 
+  /// Returns true when the model explicitly says the target is NOT present,
+  /// e.g. "not banana", "is not bananas", "isn't banana".
+  bool _vlmExplicitlyRejectsTarget(String answer, _Item target) {
+    final a = answer.toLowerCase();
+    final t = target.name.toLowerCase().trim();
+    if (t.isEmpty) return false;
+    final escapedTarget = RegExp.escape(t);
+
+    final directNegation = RegExp(
+      "\\b(?:not|no|is not|isn't|isnt)\\s+(?:a|an|the\\s+)?$escapedTarget\\b",
+      caseSensitive: false,
+    );
+    if (directNegation.hasMatch(a)) return true;
+
+    // Also catch cases like "banana is not here" / "bananas not found".
+    final targetThenNegation = RegExp(
+      "$escapedTarget\\b.{0,24}\\b(?:not|no|isn't|isnt|not found)\\b",
+      caseSensitive: false,
+    );
+    return targetThenNegation.hasMatch(a);
+  }
+
   String _normalizeToken(String token) {
     final lower = token.toLowerCase();
     final normalized = lower
@@ -670,6 +692,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final vlmSaysFound = _vlmSaysItemFound(vlmAnswer);
     final answerNamesTarget =
         target != null && _vlmAnswerMatchesTarget(vlmAnswer, target);
+    final answerRejectsTarget =
+        target != null && _vlmExplicitlyRejectsTarget(vlmAnswer, target);
     final targetOnShelfByOcr =
         target != null && _itemMatchesText(target, _tokenize(shelfText));
     final shelfMatchesOtherListItem = target != null &&
@@ -678,6 +702,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final targetFound = target != null &&
         vlmSaysFound &&
         answerNamesTarget &&
+        !answerRejectsTarget &&
         (targetOnShelfByOcr || !shelfMatchesOtherListItem);
 
     setState(() {
@@ -1183,7 +1208,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       if (_speech.isListening) {
         await _speech.stop();
       }
-      typeController.dispose();
+      // Avoid disposing immediately here: the dialog can still be in the
+      // teardown/rebuild phase on web, and disposing too early can trigger
+      // "TextEditingController used after being disposed".
     }
   }
 
