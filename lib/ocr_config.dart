@@ -24,7 +24,14 @@ String _webDefaultBaseUrl() {
 String ocrServiceBaseUrl() {
   final trimmedEnv = _trimTrailingSlash(_kOcrBaseUrlEnv.trim());
   if (trimmedEnv.isNotEmpty) return trimmedEnv;
-  final fallback = kIsWeb ? _webDefaultBaseUrl() : _kMagicDefaultBaseUrl;
+  // For web builds deployed on HTTPS hosts (e.g., Vercel), calling an HTTP backend
+  // directly often fails due to mixed-content restrictions. Default to a same-origin
+  // proxy path when no OCR_BASE_URL is provided at build time.
+  if (kIsWeb) {
+    final base = Uri.base;
+    return _trimTrailingSlash('${base.scheme}://${base.host}${base.hasPort ? ':${base.port}' : ''}/api/ocr');
+  }
+  final fallback = _kMagicDefaultBaseUrl;
   return _trimTrailingSlash(fallback);
 }
 
