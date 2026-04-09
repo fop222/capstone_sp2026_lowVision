@@ -16,8 +16,9 @@ bool _isLocalWebHost(String host) {
   return h.isEmpty || h == 'localhost' || h == '127.0.0.1' || h == '[::1]';
 }
 
-/// Web: only local dev uses same-host port 5010. Static hosts (e.g. Vercel)
-/// have no OCR on `:5010`—set [OCR_BASE_URL] at **build** time.
+/// Web: localhost uses same-host port 5010. Deployed static hosts (Vercel)
+/// default to same-origin `/api/ocr` (see `api/ocr.js` + `OCR_PROXY_TARGET`), unless
+/// [OCR_BASE_URL] was set at build time.
 String _webOcrFallbackBaseUrl() {
   final base = Uri.base;
   final scheme = base.scheme.isEmpty ? 'http' : base.scheme;
@@ -25,26 +26,30 @@ String _webOcrFallbackBaseUrl() {
   if (_isLocalWebHost(host)) {
     return '$scheme://$host:5010';
   }
-  return _kMagicDefaultBaseUrl;
+  final origin =
+      '${base.scheme}://${base.host}${base.hasPort ? ':${base.port}' : ''}';
+  return '$origin/api/ocr';
 }
 
 /// `true` if `flutter build web --dart-define=OCR_BASE_URL=...` was used.
 bool ocrBaseUrlSetAtBuildTime() =>
     _trimTrailingSlash(_kOcrBaseUrlEnv.trim()).isNotEmpty;
 
-/// Web only: deployed static site (not localhost) without `--dart-define` OCR URL.
+/// Web only: likely misconfigured if not localhost, no build-time URL, and not
+/// using the default same-origin `/api/ocr` proxy.
 bool ocrWebMissingBuildTimeUrl() {
   if (!kIsWeb) return false;
   if (ocrBaseUrlSetAtBuildTime()) return false;
   final host = Uri.base.host;
-  return !_isLocalWebHost(host);
+  if (_isLocalWebHost(host)) return false;
+  return !ocrServiceBaseUrl().contains('/api/ocr');
 }
 
 /// Resolved base URL (no trailing slash).
 String ocrServiceBaseUrl() {
   final trimmedEnv = _trimTrailingSlash(_kOcrBaseUrlEnv.trim());
   if (trimmedEnv.isNotEmpty) return trimmedEnv;
-  final fallback = kIsWeb ? _webDefaultBaseUrl() : _kMagicDefaultBaseUrl;
+  final fallback = kIsWeb ? _webOcrFallbackBaseUrl() : _kMagicDefaultBaseUrl;
   return _trimTrailingSlash(fallback);
 }
 
