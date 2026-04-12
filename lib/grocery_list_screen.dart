@@ -99,7 +99,6 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete list'),
         content: const Text('Are you sure you want to delete this list?'),
         actions: [
           TextButton(
@@ -108,7 +107,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: const Text('Confirm'),
           ),
         ],
       ),
