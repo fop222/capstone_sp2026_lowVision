@@ -95,6 +95,27 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     }
   }
 
+  Future<void> _confirmDeleteList(String listId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete list'),
+        content: const Text('Are you sure you want to delete this list?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) await _deleteList(listId);
+  }
+
   void _showCreateDialog() {
     final titleController = TextEditingController();
     showDialog(
@@ -139,18 +160,18 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Grocery Lists'),
+        leading: IconButton(
+          tooltip: 'Edit profile',
+          icon: const Icon(Icons.person_outline, size: 32),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(
+                builder: (_) => const ProfileSetupScreen(isEditing: true)),
+          ),
+        ),
         actions: [
           IconButton(
-            tooltip: 'Edit profile',
-            icon: const Icon(Icons.person_outline, size: 28),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const ProfileSetupScreen(isEditing: true)),
-            ),
-          ),
-          IconButton(
             tooltip: 'Sign out',
-            icon: const Icon(Icons.logout, size: 28),
+            icon: const Icon(Icons.logout, size: 32),
             onPressed: _signOut,
           ),
         ],
@@ -221,9 +242,42 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                             child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 20, vertical: 10),
-                              leading: Icon(Icons.list_alt,
-                                  size: 32,
-                                  color: theme.colorScheme.primary),
+                              leading: IconButton(
+                                tooltip: 'Start shopping (VLM)',
+                                icon: Icon(Icons.shopping_cart,
+                                    size: 36,
+                                    color: theme.colorScheme.secondary),
+                                onPressed: () async {
+                                  try {
+                                    final items = await supabase
+                                        .from('grocery_items')
+                                        .select()
+                                        .eq('list_id', listId)
+                                        .order('name');
+                                    if (!context.mounted) return;
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => AisleScannerVlmScreen(
+                                          listId: listId,
+                                          listTitle: listTitle,
+                                          items:
+                                              List<Map<String, dynamic>>.from(
+                                                  items),
+                                          cameras: cameras,
+                                        ),
+                                      ),
+                                    );
+                                  } catch (e) {
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      SnackBar(
+                                          content:
+                                              Text('Error loading items: $e')),
+                                    );
+                                  }
+                                },
+                              ),
                               title: Text(listTitle,
                                   style: theme.textTheme.bodyLarge?.copyWith(
                                       fontWeight: FontWeight.w600)),
@@ -233,53 +287,12 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                           list['created_at'] as String),
                                     )
                                   : null,
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Start shopping (VLM)',
-                                    icon: Icon(Icons.shopping_cart,
-                                        size: 28,
-                                        color: theme.colorScheme.secondary),
-                                    onPressed: () async {
-                                      try {
-                                        final items = await supabase
-                                            .from('grocery_items')
-                                            .select()
-                                            .eq('list_id', listId)
-                                            .order('name');
-                                        if (!context.mounted) return;
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => AisleScannerVlmScreen(
-                                              listId: listId,
-                                              listTitle: listTitle,
-                                              items:
-                                                  List<Map<String, dynamic>>.from(
-                                                      items),
-                                              cameras: cameras,
-                                            ),
-                                          ),
-                                        );
-                                      } catch (e) {
-                                        if (!context.mounted) return;
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(
-                                              content:
-                                                  Text('Error loading items: $e')),
-                                        );
-                                      }
-                                    },
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Delete list',
-                                    icon: Icon(Icons.delete_outline,
-                                        size: 28,
-                                        color: theme.colorScheme.error),
-                                    onPressed: () => _deleteList(listId),
-                                  ),
-                                ],
+                              trailing: IconButton(
+                                tooltip: 'Delete list',
+                                icon: Icon(Icons.delete_outline,
+                                    size: 32,
+                                    color: theme.colorScheme.error),
+                                onPressed: () => _confirmDeleteList(listId),
                               ),
                               onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute(
@@ -297,7 +310,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
       floatingActionButton: FloatingActionButton.large(
         onPressed: _showCreateDialog,
         tooltip: 'New list',
-        child: const Icon(Icons.add, size: 36),
+        child: const Icon(Icons.add, size: 40),
       ),
     );
   }

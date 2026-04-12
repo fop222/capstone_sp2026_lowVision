@@ -41,12 +41,12 @@ class MyApp extends StatelessWidget {
   );
 
   static const _baseTextTheme = TextTheme(
-    displayLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-    headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-    titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-    bodyLarge: TextStyle(fontSize: 20),
-    bodyMedium: TextStyle(fontSize: 18),
-    labelLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+    displayLarge: TextStyle(fontSize: 34, fontWeight: FontWeight.bold),
+    headlineMedium: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+    titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+    bodyLarge: TextStyle(fontSize: 22),
+    bodyMedium: TextStyle(fontSize: 20),
+    labelLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
   );
 
   @override
@@ -76,7 +76,7 @@ class MyApp extends StatelessWidget {
             backgroundColor: const Color(0xFF6D5EF5),
             foregroundColor: const Color(0xFFF5F7FA),
             minimumSize: const Size(double.infinity, 56),
-            textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16)),
           ),
@@ -86,7 +86,7 @@ class MyApp extends StatelessWidget {
             foregroundColor: const Color(0xFF6D5EF5),
             side: const BorderSide(color: Color(0xFF6D5EF5), width: 2),
             minimumSize: const Size(double.infinity, 56),
-            textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16)),
           ),
@@ -101,8 +101,8 @@ class MyApp extends StatelessWidget {
           fillColor: const Color(0xFF1A1D24),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-          labelStyle: const TextStyle(fontSize: 18, color: Color(0xFFC2C7D0)),
-          hintStyle: const TextStyle(fontSize: 18, color: Color(0xFFC2C7D0)),
+          labelStyle: const TextStyle(fontSize: 20, color: Color(0xFFC2C7D0)),
+          hintStyle: const TextStyle(fontSize: 20, color: Color(0xFFC2C7D0)),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Colors.white24, width: 2),
@@ -115,7 +115,7 @@ class MyApp extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Color(0xFF6D5EF5), width: 2),
           ),
-          errorStyle: const TextStyle(fontSize: 16, color: Color(0xFFFF6B6B)),
+          errorStyle: const TextStyle(fontSize: 18, color: Color(0xFFFF6B6B)),
         ),
         cardTheme: CardThemeData(
           color: const Color(0xFF1A1D24),
@@ -127,7 +127,7 @@ class MyApp extends StatelessWidget {
         chipTheme: ChipThemeData(
           backgroundColor: const Color(0xFF1A1D24),
           selectedColor: const Color(0xFF6D5EF5).withValues(alpha: 0.3),
-          labelStyle: const TextStyle(fontSize: 16, color: Colors.white),
+          labelStyle: const TextStyle(fontSize: 18, color: Colors.white),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -135,8 +135,8 @@ class MyApp extends StatelessWidget {
         listTileTheme: const ListTileThemeData(
           contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
           minVerticalPadding: 12,
-          titleTextStyle: TextStyle(fontSize: 20, color: Colors.white),
-          subtitleTextStyle: TextStyle(fontSize: 16, color: Colors.white70),
+          titleTextStyle: TextStyle(fontSize: 22, color: Colors.white),
+          subtitleTextStyle: TextStyle(fontSize: 18, color: Colors.white70),
         ),
         checkboxTheme: CheckboxThemeData(
           fillColor: WidgetStateProperty.resolveWith((states) {
@@ -152,13 +152,14 @@ class MyApp extends StatelessWidget {
           backgroundColor: const Color(0xFF1A1D24),
           titleTextStyle:
               textTheme.headlineMedium?.copyWith(color: Colors.white),
-          contentTextStyle: textTheme.bodyLarge?.copyWith(color: Colors.white),
+          contentTextStyle:
+              textTheme.bodyLarge?.copyWith(color: Colors.white, fontSize: 20),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         ),
         snackBarTheme: SnackBarThemeData(
           backgroundColor: const Color(0xFF1A1D24),
-          contentTextStyle: const TextStyle(fontSize: 18, color: Colors.white),
+          contentTextStyle: const TextStyle(fontSize: 20, color: Colors.white),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           behavior: SnackBarBehavior.floating,

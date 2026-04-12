@@ -243,6 +243,7 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
                             });
                           },
                     style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
                       textStyle: theme.textTheme.bodyMedium,
                     ),
                     child: Text(

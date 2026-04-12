@@ -288,7 +288,7 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh, size: 28),
+            icon: const Icon(Icons.refresh, size: 32),
             onPressed: _fetchItems,
           ),
         ],
@@ -345,7 +345,7 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                               child: Text(
                                 cat.toUpperCase(),
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: theme.colorScheme.primary,
                                   letterSpacing: 1.2,
@@ -364,19 +364,21 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                                 title: Text(
                                   item['name'] as String? ?? '',
                                   style: TextStyle(
-                                    fontSize: 20,
+                                    fontSize: 22,
                                     decoration: checked
                                         ? TextDecoration.lineThrough
                                         : null,
-                                    color: checked
-                                        ? Colors.white38
-                                        : Colors.white,
+                                    decorationColor: checked
+                                        ? const Color(0xFFFF1744)
+                                        : null,
+                                    decorationThickness: checked ? 3 : null,
+                                    color: Colors.white,
                                   ),
                                 ),
                                 trailing: IconButton(
                                   tooltip: 'Delete item',
                                   icon: Icon(Icons.delete_outline,
-                                      size: 28,
+                                      size: 32,
                                       color: theme.colorScheme.error),
                                   onPressed: () =>
                                       _deleteItem(item['id'] as String),
@@ -391,7 +393,7 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
       floatingActionButton: FloatingActionButton.large(
         onPressed: _showInputModeDialog,
         tooltip: 'Add item',
-        child: const Icon(Icons.add, size: 36),
+        child: const Icon(Icons.add, size: 40),
       ),
     );
   }

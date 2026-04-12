@@ -76,6 +76,8 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   String _shelfStatusMessage = '';
   String _vlmAnswer = '';
   Uint8List? _lastShelfImageBytes;
+  /// Shown instead of live preview while OCR runs and on scan result screens.
+  Uint8List? _frozenScanBytes;
   List<_Item> _aisleMatches = [];
   List<_Item> _shelfMatches = [];
   List<_Item> _pendingShelfItems = [];
@@ -147,6 +149,18 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     _camera = null;
     _cameraReady = false;
     await _initCamera();
+  }
+
+  Future<void> _disposeLiveCamera() async {
+    await _camera?.dispose();
+    _camera = null;
+    _cameraReady = false;
+  }
+
+  Future<void> _clearFrozenAndRestartCamera() async {
+    if (!mounted) return;
+    setState(() => _frozenScanBytes = null);
+    await _restartCamera();
   }
 
   Future<void> _flipCamera() async {
@@ -589,15 +603,23 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
         _shelfPromptIndex++;
         final nextItem = _pendingShelfItems[_shelfPromptIndex];
         await _speak('Next target item is ${nextItem.name}. Scan the shelf.');
+        if (!mounted) return;
         setState(() => _phase = _Phase.shelf);
+        await _clearFrozenAndRestartCamera();
       } else {
         await _speak(
             'All target items in aisle $_currentAisleLabel are complete. You can move to the next aisle.');
-        setState(() => _phase = _Phase.shelfResults);
+        if (!mounted) return;
+        setState(() {
+          _frozenScanBytes = null;
+          _phase = _Phase.shelfResults;
+        });
       }
     } else {
       await _speak('Continue scanning the shelf for ${current?.name ?? "the item"}.');
+      if (!mounted) return;
       setState(() => _phase = _Phase.shelf);
+      await _clearFrozenAndRestartCamera();
     }
   }
 
@@ -610,10 +632,14 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       bytes = await _capturePhoto();
     }
     if (bytes == null) return;
+    await _disposeLiveCamera();
+    if (!mounted) return;
+    setState(() => _frozenScanBytes = bytes);
     await _speak('Reading aisle sign.');
     final text = await _runOcr(bytes);
     if (text == null) {
       await _speak('Could not read the sign. Please try again.');
+      await _clearFrozenAndRestartCamera();
       return;
     }
     _aisleOcrText = text;
@@ -627,6 +653,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       });
       await _speak(
           'This aisle sign image is unclear. Please go closer, hold steady, and retake the aisle sign photo.');
+      await _clearFrozenAndRestartCamera();
       return;
     }
     _aisleStatusMessage = '';
@@ -651,6 +678,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
 
   Future<void> _onGoToShelf() async {
     setState(() {
+      _frozenScanBytes = null;
       _phase = _Phase.shelf;
       _aisleStatusMessage = '';
       _shelfOcrText = '';
@@ -678,11 +706,15 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     }
     if (bytes == null) return;
     _lastShelfImageBytes = bytes;
+    await _disposeLiveCamera();
+    if (!mounted) return;
+    setState(() => _frozenScanBytes = bytes);
     await _speak('Reading shelf text.');
 
     final shelfText = await _runOcr(bytes);
     if (shelfText == null) {
       await _speak('Could not read the shelf text. Please try again.');
+      await _clearFrozenAndRestartCamera();
       return;
     }
     _shelfOcrText = shelfText;
@@ -721,7 +753,9 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       if (!targetFound) {
         await _speak(
             'Go closer to the shelf and try scanning again until ${target.name} is detected.');
+        if (!mounted) return;
         setState(() => _phase = _Phase.shelf);
+        await _clearFrozenAndRestartCamera();
         return;
       }
       await _promptShelfDecision(target);
@@ -733,6 +767,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
 
   Future<void> _onScanAnotherShelf() async {
     setState(() {
+      _frozenScanBytes = null;
       _phase = _Phase.shelf;
       _aisleStatusMessage = '';
       _shelfOcrText = '';
@@ -765,6 +800,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       _shelfPromptIndex = 0;
       _vlmAnswer = '';
       _lastShelfImageBytes = null;
+      _frozenScanBytes = null;
     });
     await _restartCamera();
     await _speak(
@@ -858,6 +894,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
         return;
       }
       setState(() {
+        _frozenScanBytes = null;
         _currentAisle = parsed;
         _currentAisleLabel = parsed.toString();
         _phase = _Phase.aisleSign;
@@ -891,6 +928,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     }
 
     setState(() {
+      _frozenScanBytes = null;
       _currentAisleLabel = value;
       _phase = _Phase.aisleResults;
       _aisleOcrText = value;
@@ -929,6 +967,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
         });
         await _speak(
             'Next item in this aisle is ${_pendingShelfItems[nextIdx].name}.');
+        await _clearFrozenAndRestartCamera();
       }
     }
   }
@@ -1024,30 +1063,30 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
         actions: [
           IconButton(
             tooltip: 'End shopping',
-            icon: const Icon(Icons.stop_circle_outlined, size: 28),
+            icon: const Icon(Icons.stop_circle_outlined, size: 34),
             onPressed: _ocrLoading ? null : _onEndShopping,
           ),
           IconButton(
             tooltip: 'Try with VLM',
-            icon: const Icon(Icons.auto_awesome, size: 28),
+            icon: const Icon(Icons.auto_awesome, size: 34),
             onPressed: (_lastShelfImageBytes == null || _ocrLoading)
                 ? null
                 : _tryWithVlm,
           ),
           IconButton(
             tooltip: 'Set aisle manually',
-            icon: const Icon(Icons.edit_location_alt, size: 28),
+            icon: const Icon(Icons.edit_location_alt, size: 34),
             onPressed: _showAisleOverrideDialog,
           ),
           IconButton(
             tooltip: 'Check off items',
-            icon: const Icon(Icons.checklist, size: 28),
+            icon: const Icon(Icons.checklist, size: 34),
             onPressed: _showQuickCheckoffSheet,
           ),
           IconButton(
             tooltip: _audioEnabled ? 'Mute audio' : 'Unmute audio',
             icon: Icon(_audioEnabled ? Icons.volume_up : Icons.volume_off,
-                size: 28),
+                size: 34),
             onPressed: () {
               setState(() => _audioEnabled = !_audioEnabled);
               if (!_audioEnabled) _tts.stop();
@@ -1056,7 +1095,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
           Builder(
             builder: (ctx) => IconButton(
               tooltip: 'View full list',
-              icon: const Icon(Icons.list_alt),
+              icon: const Icon(Icons.list_alt, size: 34),
               onPressed: () => Scaffold.of(ctx).openEndDrawer(),
             ),
           ),
@@ -1074,6 +1113,10 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   Widget _buildCameraView() {
     final isAisle = _phase == _Phase.aisleSign;
     final targetItem = _currentShelfTarget;
+    final frozen = _frozenScanBytes != null;
+    final bool scanButtonsDisabled =
+        _takingPicture || _ocrLoading || (!frozen && !_cameraReady);
+
     return Column(
       children: [
         Expanded(
@@ -1084,28 +1127,61 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                 Center(
                     child: Text(_cameraError!,
                         style: const TextStyle(color: Color(0xFFFF6B6B))))
+              else if (frozen)
+                Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ColoredBox(
+                      color: Colors.black,
+                      child: Center(
+                        child: Image.memory(
+                          _frozenScanBytes!,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                    if (_ocrLoading)
+                      Container(
+                        color: Colors.black87,
+                        child: const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(
+                                  color: Color(0xFF6D5EF5), strokeWidth: 4),
+                              SizedBox(height: 16),
+                              Text('Reading text…',
+                                  style: TextStyle(
+                                      color: Colors.white, fontSize: 24)),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                )
               else if (!_cameraReady)
                 const Center(child: CircularProgressIndicator())
               else
                 CameraPreview(_camera!),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  color: Colors.black87,
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-                  child: Text(
-                    isAisle
-                        ? 'Point at the aisle sign\nthen tap the button below'
-                        : 'Point at the shelf\nthen tap the button below',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 20),
+              if (!frozen) ...[
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: Colors.black87,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 16, horizontal: 20),
+                    child: Text(
+                      isAisle
+                          ? 'Point at the aisle sign\nthen tap the button below'
+                          : 'Point at the shelf\nthen tap the button below',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 22),
+                    ),
                   ),
                 ),
-              ),
-              Positioned(
+                Positioned(
                   top: 70,
                   right: 12,
                   child: Material(
@@ -1113,16 +1189,17 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                     shape: const CircleBorder(),
                     clipBehavior: Clip.antiAlias,
                     child: IconButton(
-                      iconSize: 28,
+                      iconSize: 32,
                       padding: const EdgeInsets.all(12),
                       tooltip: 'Switch camera',
                       onPressed: _flipCamera,
                       icon: const Icon(Icons.cameraswitch,
-                          color: Colors.white),
+                          color: Colors.white, size: 32),
                     ),
                   ),
                 ),
-              if (!isAisle && targetItem != null)
+              ],
+              if (!isAisle && targetItem != null && !frozen)
                 Positioned(
                   top: 130,
                   left: 12,
@@ -1139,7 +1216,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.black,
-                        fontSize: 20,
+                        fontSize: 22,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -1161,7 +1238,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                           .map((i) => Chip(
                                 label: Text(i.name,
                                     style: const TextStyle(
-                                        color: Colors.black, fontSize: 16)),
+                                        color: Colors.black, fontSize: 18)),
                                 backgroundColor:
                                     const Color(0xFF6D5EF5).withOpacity(0.9),
                                 padding: const EdgeInsets.symmetric(
@@ -1171,7 +1248,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                     ),
                   ),
                 ),
-              if (_ocrLoading)
+              if (!frozen && _ocrLoading)
                 Container(
                   color: Colors.black87,
                   child: const Center(
@@ -1183,7 +1260,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                         SizedBox(height: 16),
                         Text('Reading text...',
                             style:
-                                TextStyle(color: Colors.white, fontSize: 22)),
+                                TextStyle(color: Colors.white, fontSize: 24)),
                       ],
                     ),
                   ),
@@ -1198,12 +1275,12 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
             child: Row(
               children: [
                 const Icon(Icons.error_outline,
-                    color: Color(0xFFFF6B6B), size: 24),
+                    color: Color(0xFFFF6B6B), size: 30),
                 const SizedBox(width: 10),
                 Expanded(
                     child: Text(_ocrError!,
                         style: const TextStyle(
-                            color: Color(0xFFFF6B6B), fontSize: 18))),
+                            color: Color(0xFFFF6B6B), fontSize: 20))),
               ],
             ),
           ),
@@ -1214,60 +1291,67 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (!isAisle && _shelfStatusMessage.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.black87,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF6D5EF5)),
-                    ),
-                    child: Text(
-                      _shelfStatusMessage,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Color(0xFF6D5EF5), fontSize: 16),
+                  Semantics(
+                    liveRegion: true,
+                    label: _shelfStatusMessage,
+                    child: Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF6D5EF5)),
+                      ),
+                      child: Text(
+                        _shelfStatusMessage,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Color(0xFF6D5EF5), fontSize: 20),
+                      ),
                     ),
                   ),
                 if (isAisle && _aisleStatusMessage.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.black87,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF3AE4C2)),
-                    ),
-                    child: Text(
-                      _aisleStatusMessage,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Color(0xFF3AE4C2), fontSize: 16),
+                  Semantics(
+                    liveRegion: true,
+                    label: _aisleStatusMessage,
+                    child: Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3AE4C2)),
+                      ),
+                      child: Text(
+                        _aisleStatusMessage,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Color(0xFF3AE4C2), fontSize: 20),
+                      ),
                     ),
                   ),
                 Row(
                   children: [
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed:
-                            (_takingPicture || _ocrLoading || !_cameraReady)
-                                ? null
-                                : (isAisle
-                                    ? () => _onScanAisleSign()
-                                    : () => _onScanShelf()),
+                        onPressed: scanButtonsDisabled
+                            ? null
+                            : (isAisle
+                                ? () => _onScanAisleSign()
+                                : () => _onScanShelf()),
                         icon: _takingPicture
                             ? const SizedBox(
-                                width: 18,
-                                height: 18,
+                                width: 22,
+                                height: 22,
                                 child:
                                     CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.camera_alt),
+                            : const Icon(Icons.camera_alt, size: 28),
                         label: Text(isAisle ? 'Scan Aisle Sign' : 'Scan Shelf',
-                            style: const TextStyle(fontSize: 16)),
+                            style: const TextStyle(fontSize: 20)),
                         style: ElevatedButton.styleFrom(
                             minimumSize: const Size(0, 56),
                             padding: const EdgeInsets.symmetric(vertical: 16)),
@@ -1275,13 +1359,13 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton.icon(
-                      onPressed: (_takingPicture || _ocrLoading)
+                      onPressed: scanButtonsDisabled
                           ? null
                           : (isAisle
                               ? () => _onScanAisleSign(fromGallery: true)
                               : () => _onScanShelf(fromGallery: true)),
-                      icon: const Icon(Icons.photo_library),
-                      label: const Text('Upload'),
+                      icon: const Icon(Icons.photo_library, size: 28),
+                      label: const Text('Upload', style: TextStyle(fontSize: 20)),
                       style: ElevatedButton.styleFrom(
                           minimumSize: const Size(0, 56),
                           padding: const EdgeInsets.symmetric(
@@ -1298,84 +1382,129 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   }
 
   Widget _buildAisleResults() {
+    final preview = _frozenScanBytes;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: double.infinity,
-          color: const Color(0xFF6D5EF5).withOpacity(0.1),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          child: Row(
+        if (preview != null)
+          Expanded(
+            flex: 4,
+            child: DecoratedBox(
+              decoration: const BoxDecoration(color: Colors.black),
+              child: Center(
+                child: Image.memory(preview, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        Expanded(
+          flex: preview != null ? 5 : 1,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.article_outlined,
-                  color: Color(0xFF6D5EF5), size: 28),
-              const SizedBox(width: 10),
+              Container(
+                width: double.infinity,
+                color: const Color(0xFF6D5EF5).withOpacity(0.1),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                child: Row(
+                  children: [
+                    const Icon(Icons.article_outlined,
+                        color: Color(0xFF6D5EF5), size: 32),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _aisleOcrText.isEmpty
+                            ? '(no text detected)'
+                            : _aisleOcrText,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 20, color: Color(0xFF6D5EF5)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                child: Semantics(
+                  liveRegion: true,
+                  label: _aisleMatches.isEmpty
+                      ? 'No list items match this aisle'
+                      : '${_aisleMatches.length} item${_aisleMatches.length == 1 ? "" : "s"} in aisle $_currentAisleLabel',
+                  child: Text(
+                    _aisleMatches.isEmpty
+                        ? 'No list items match this aisle'
+                        : '${_aisleMatches.length} item${_aisleMatches.length == 1 ? "" : "s"} in aisle $_currentAisleLabel:',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 24,
+                        color: Colors.white),
+                  ),
+                ),
+              ),
+              if (_aisleMatches.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: Text(
+                      'No items matched. You can still scan the shelf or go to the next aisle.',
+                      style: TextStyle(color: Colors.white70, fontSize: 20)),
+                ),
               Expanded(
-                child: Text(
-                  _aisleOcrText.isEmpty ? '(no text detected)' : _aisleOcrText,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 18, color: Color(0xFF6D5EF5)),
+                child: ListView(
+                  children: _aisleMatches
+                      .map((item) => CheckboxListTile(
+                            value: item.isChecked,
+                            onChanged: (_) => _toggleItem(item),
+                            title: Text(
+                              item.name,
+                              style: TextStyle(
+                                fontSize: 22,
+                                decoration: item.isChecked
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                                decorationColor: item.isChecked
+                                    ? const Color(0xFFFF1744)
+                                    : null,
+                                decorationThickness: item.isChecked ? 3 : null,
+                                color: Colors.white,
+                              ),
+                            ),
+                            subtitle: Text(item.category,
+                                style: const TextStyle(fontSize: 18)),
+                            controlAffinity: ListTileControlAffinity.leading,
+                          ))
+                      .toList(),
+                ),
+              ),
+              const Divider(height: 1),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _onNextAisle,
+                          icon: const Icon(Icons.skip_next, size: 28),
+                          label: const Text('Next Aisle',
+                              style: TextStyle(fontSize: 20)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _onGoToShelf,
+                          icon: const Icon(Icons.view_agenda_outlined, size: 28),
+                          label: const Text('Scan Shelf',
+                              style: TextStyle(fontSize: 20)),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
-          child: Text(
-            _aisleMatches.isEmpty
-                ? 'No list items match this aisle'
-                : '${_aisleMatches.length} item${_aisleMatches.length == 1 ? "" : "s"} in aisle $_currentAisleLabel:',
-            style: const TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white),
-          ),
-        ),
-        if (_aisleMatches.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Text(
-                'No items matched. You can still scan the shelf or go to the next aisle.',
-                style: TextStyle(color: Colors.white60, fontSize: 18)),
-          ),
-        Expanded(
-          child: ListView(
-            children: _aisleMatches
-                .map((item) => CheckboxListTile(
-                      value: item.isChecked,
-                      onChanged: (_) => _toggleItem(item),
-                      title: Text(item.name),
-                      subtitle: Text(item.category,
-                          style: const TextStyle(fontSize: 12)),
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ))
-                .toList(),
-          ),
-        ),
-        const Divider(height: 1),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _onNextAisle,
-                    icon: const Icon(Icons.skip_next),
-                    label: const Text('Next Aisle'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _onGoToShelf,
-                    icon: const Icon(Icons.view_agenda_outlined),
-                    label: const Text('Scan Shelf'),
-                  ),
-                ),
-              ],
-            ),
           ),
         ),
       ],
@@ -1383,100 +1512,138 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   }
 
   Widget _buildShelfResults() {
+    final preview = _frozenScanBytes;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: double.infinity,
-          color: const Color(0xFF3AE4C2).withOpacity(0.1),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          child: Row(
+        if (preview != null)
+          Expanded(
+            flex: 4,
+            child: DecoratedBox(
+              decoration: const BoxDecoration(color: Colors.black),
+              child: Center(
+                child: Image.memory(preview, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        Expanded(
+          flex: preview != null ? 5 : 1,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.document_scanner_outlined,
-                  color: Color(0xFF3AE4C2), size: 28),
-              const SizedBox(width: 10),
+              Container(
+                width: double.infinity,
+                color: const Color(0xFF3AE4C2).withOpacity(0.1),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                child: Row(
+                  children: [
+                    const Icon(Icons.document_scanner_outlined,
+                        color: Color(0xFF3AE4C2), size: 32),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _shelfOcrText.isEmpty
+                            ? 'Shelf image saved'
+                            : _shelfOcrText,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 20, color: Color(0xFF3AE4C2)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                child: Semantics(
+                  liveRegion: true,
+                  label: _shelfMatches.isEmpty
+                      ? 'Shelf image saved to server'
+                      : '${_shelfMatches.length} item${_shelfMatches.length == 1 ? "" : "s"} found',
+                  child: Text(
+                    _shelfMatches.isEmpty
+                        ? 'Shelf image saved to server'
+                        : '${_shelfMatches.length} item${_shelfMatches.length == 1 ? "" : "s"} found:',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 24,
+                        color: Colors.white),
+                  ),
+                ),
+              ),
+              if (_shelfMatches.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: Text(
+                      'Try scanning another shelf in this aisle, or move to the next aisle.',
+                      style: TextStyle(color: Colors.white70, fontSize: 20)),
+                ),
               Expanded(
-                child: Text(
-                  _shelfOcrText.isEmpty
-                      ? 'Shelf image saved'
-                      : _shelfOcrText,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 18, color: Color(0xFF3AE4C2)),
+                child: ListView(
+                  children: _shelfMatches
+                      .map((item) => CheckboxListTile(
+                            value: item.isChecked,
+                            onChanged: (_) => _toggleItem(item),
+                            title: Text(
+                              item.name,
+                              style: TextStyle(
+                                fontSize: 22,
+                                decoration: item.isChecked
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                                decorationColor: item.isChecked
+                                    ? const Color(0xFFFF1744)
+                                    : null,
+                                decorationThickness: item.isChecked ? 3 : null,
+                                color: Colors.white,
+                              ),
+                            ),
+                            subtitle: Text(item.category,
+                                style: const TextStyle(fontSize: 18)),
+                            secondary: Icon(
+                              item.isChecked
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              size: 32,
+                              color: item.isChecked
+                                  ? const Color(0xFF3AE4C2)
+                                  : null,
+                            ),
+                            controlAffinity: ListTileControlAffinity.leading,
+                          ))
+                      .toList(),
+                ),
+              ),
+              const Divider(height: 1),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _onScanAnotherShelf,
+                          icon: const Icon(Icons.add_a_photo_outlined, size: 28),
+                          label: const Text('Another Shelf',
+                              style: TextStyle(fontSize: 20)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _onNextAisle,
+                          icon: const Icon(Icons.skip_next, size: 28),
+                          label: const Text('Next Aisle',
+                              style: TextStyle(fontSize: 20)),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
-          child: Text(
-            _shelfMatches.isEmpty
-                ? 'Shelf image saved to server'
-                : '${_shelfMatches.length} item${_shelfMatches.length == 1 ? "" : "s"} found:',
-            style: const TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white),
-          ),
-        ),
-        if (_shelfMatches.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Text(
-                'Try scanning another shelf in this aisle, or move to the next aisle.',
-                style: TextStyle(color: Colors.white60, fontSize: 18)),
-          ),
-        Expanded(
-          child: ListView(
-            children: _shelfMatches
-                .map((item) => CheckboxListTile(
-                      value: item.isChecked,
-                      onChanged: (_) => _toggleItem(item),
-                      title: Text(
-                        item.name,
-                        style: TextStyle(
-                          decoration: item.isChecked
-                              ? TextDecoration.lineThrough
-                              : null,
-                          color: item.isChecked ? Colors.grey : null,
-                        ),
-                      ),
-                      subtitle: Text(item.category,
-                          style: const TextStyle(fontSize: 12)),
-                      secondary: Icon(
-                        item.isChecked
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                        color: item.isChecked ? const Color(0xFF3AE4C2) : null,
-                      ),
-                      controlAffinity: ListTileControlAffinity.leading,
-                    ))
-                .toList(),
-          ),
-        ),
-        const Divider(height: 1),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _onScanAnotherShelf,
-                    icon: const Icon(Icons.add_a_photo_outlined),
-                    label: const Text('Another Shelf'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _onNextAisle,
-                    icon: const Icon(Icons.skip_next),
-                    label: const Text('Next Aisle'),
-                  ),
-                ),
-              ],
-            ),
           ),
         ),
       ],
@@ -1561,12 +1728,14 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                   ),
                   ...checked.map((item) => ListTile(
                         leading: const Icon(Icons.check_circle,
-                            color: Color(0xFF6D5EF5), size: 24),
+                            color: Color(0xFF3AE4C2), size: 32),
                         title: Text(item.name,
                             style: const TextStyle(
-                                fontSize: 20,
+                                fontSize: 22,
                                 decoration: TextDecoration.lineThrough,
-                                color: Colors.white38)),
+                                decorationColor: Color(0xFFFF1744),
+                                decorationThickness: 3,
+                                color: Colors.white)),
                         trailing: Checkbox(
                             value: item.isChecked,
                             onChanged: (_) => _toggleItem(item)),
