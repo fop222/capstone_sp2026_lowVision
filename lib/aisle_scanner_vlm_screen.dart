@@ -11,9 +11,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import 'app_speech.dart';
+import 'app_voice_policy.dart';
 import 'grocery_list_detail_screen.dart';
 import 'main.dart';
 import 'ocr_config.dart';
+import 'shopping_voice_host.dart';
 
 class _Item {
   final String id;
@@ -38,6 +41,54 @@ class _Item {
       );
 }
 
+String _readableAisleTitleFromOcr(String raw) {
+  final lines = raw
+      .split(RegExp(r'[\r\n]+'))
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  final first = lines.isEmpty ? raw.trim() : lines.first;
+  final collapsed = first.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (collapsed.isEmpty) return 'this aisle';
+  if (collapsed.length > 72) return '${collapsed.substring(0, 72)}…';
+  return collapsed;
+}
+
+String _aisleWalkInLine(List<_Item> matches) {
+  final names = matches.map((e) => e.name).toList();
+  if (names.isEmpty) return '';
+  if (names.length == 1) {
+    return '${names.first} is in this aisle. Walk into it.';
+  }
+  if (names.length == 2) {
+    return '${names[0]} and ${names[1]} are in this aisle. Walk into it.';
+  }
+  final allButLast = names.sublist(0, names.length - 1).join(', ');
+  return '$allButLast, and ${names.last} are in this aisle. Walk into it.';
+}
+
+String _humanizeShelfLocationPhrases(String input) {
+  var t = input;
+  void rep(String from, String to) {
+    t = t.replaceAll(RegExp(RegExp.escape(from), caseSensitive: false), to);
+  }
+
+  rep('bottom left', 'bottom shelf on the left');
+  rep('bottom right', 'bottom shelf on the right');
+  rep('top left', 'top shelf on the left');
+  rep('top right', 'top shelf on the right');
+  rep('middle left', 'middle shelf on the left');
+  rep('middle right', 'middle shelf on the right');
+  rep('middle center', 'middle shelf in the center');
+  rep('center left', 'middle shelf on the left');
+  rep('center right', 'middle shelf on the right');
+  rep('upper left', 'top shelf on the left');
+  rep('upper right', 'top shelf on the right');
+  rep('lower left', 'bottom shelf on the left');
+  rep('lower right', 'bottom shelf on the right');
+  return t;
+}
+
 enum _Phase { aisleSign, aisleResults, shelf, shelfResults }
 
 const _kMenuEnd = 'end';
@@ -53,6 +104,9 @@ const _shoppingMenuOrderDefault = [
 ];
 
 const _prefsVlmMenuOrder = 'vlm_shopping_menu_order_v1';
+
+const _kUnreadableAisleMessage =
+    'I could not read the aisle sign. Please retake the photo. If needed, tap Get Help from store employee.';
 
 class AisleScannerVlmScreen extends StatefulWidget {
   final String listId;
@@ -80,8 +134,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   int _cameraIndex = 0;
 
   final FlutterTts _tts = FlutterTts();
-  final SpeechToText _speech = SpeechToText();
   final ImagePicker _picker = ImagePicker();
+  late final ShoppingVoiceHost _shoppingVoiceHost;
   bool _speechAvailable = false;
   Completer<void>? _stopAisleListenRequested;
 
@@ -98,7 +152,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   String _shelfStatusMessage = '';
   String _vlmAnswer = '';
   String _lastSpoken = '';
-  bool _audioEnabled = true;
   bool _shoppingMenuOpen = false;
   bool _fullScreenListOpen = false;
   bool _showAisleUnclearEmployeeOption = false;
@@ -122,6 +175,26 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     super.initState();
     _items = widget.items.map(_Item.fromMap).toList();
     _initialCheckedById = {for (final item in _items) item.id: item.isChecked};
+    VlmShoppingSession.active = true;
+    _shoppingVoiceHost = ShoppingVoiceHost(
+      onEndShopping: () async {
+        if (!mounted) return;
+        await _onEndShopping();
+      },
+      onScanAisleSign: _voiceCommandScanAisle,
+      onScanShelf: _voiceCommandScanShelf,
+      onOpenShoppingList: () async {
+        if (!mounted) return;
+        setState(() {
+          _shoppingMenuOpen = false;
+          _fullScreenListOpen = true;
+        });
+      },
+      onOpenAddItem: () async {
+        if (!mounted) return;
+        await _openAddItemsFromDrawer();
+      },
+    )..mount();
     _tts.awaitSpeakCompletion(true);
     _initSpeech();
     _initCamera();
@@ -135,18 +208,27 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   @override
   void dispose() {
+    _shoppingVoiceHost.unmount();
+    VlmShoppingSession.active = false;
     _camera?.dispose();
-    _speech.stop();
+    AppSpeech.I.stt.stop();
     _tts.stop();
     super.dispose();
   }
 
   Future<void> _initSpeech() async {
     try {
-      _speechAvailable = await _speech.initialize(
+      _speechAvailable = await AppSpeech.I.ensureInitialized(
         onError: (err) {
           if (!mounted) return;
-          final msg = err.errorMsg;
+          final dynamic e = err;
+          final msg = (() {
+            try {
+              final m = e.errorMsg;
+              if (m is String && m.isNotEmpty) return m;
+            } catch (_) {}
+            return err.toString();
+          })();
           if (msg.isNotEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -194,13 +276,13 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     }
 
     try {
-      if (_speech.isListening) {
-        await _speech.stop();
+      if (AppSpeech.I.stt.isListening) {
+        await AppSpeech.I.stt.stop();
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
 
       try {
-        await _speech.listen(
+        await AppSpeech.I.stt.listen(
           onResult: (result) {
             recognized = result.recognizedWords;
             if (recognized.isNotEmpty) {
@@ -240,8 +322,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         Future<void>.delayed(Duration(seconds: kIsWeb ? 62 : 32)),
       ]);
 
-      if (_speech.isListening) {
-        await _speech.stop();
+      if (AppSpeech.I.stt.isListening) {
+        await AppSpeech.I.stt.stop();
       }
 
       if (kIsWeb && !done.isCompleted) {
@@ -252,8 +334,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       }
     } finally {
       _stopAisleListenRequested = null;
-      if (_speech.isListening) {
-        await _speech.stop();
+      if (AppSpeech.I.stt.isListening) {
+        await AppSpeech.I.stt.stop();
       }
       await Future<void>.delayed(Duration(milliseconds: kIsWeb ? 800 : 400));
     }
@@ -443,44 +525,35 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     required _Item? target,
     required bool targetFound,
   }) {
-    final cleaned = _vlmAnswerWithoutFoundTags(vlmAnswer);
+    final cleanedRaw = _vlmAnswerWithoutFoundTags(vlmAnswer);
+    final cleaned = _humanizeShelfLocationPhrases(cleanedRaw);
     final hasMatches = matchedNames.isNotEmpty;
+
+    if (target != null && !targetFound) {
+      return 'No ${target.name} found. Keep moving along the aisle.';
+    }
 
     if (target == null) {
       if (!hasMatches) {
         return cleaned.isEmpty
-            ? 'VLM detected: nothing clear.'
-            : 'VLM detected: $cleaned';
+            ? 'Nothing clear on this shelf yet.'
+            : cleaned;
       }
       return cleaned.isEmpty
-          ? 'Detected list matches: $matchedNames'
-          : 'Detected list matches: $matchedNames. VLM: $cleaned';
+          ? 'Your list on this shelf includes: $matchedNames.'
+          : '$cleaned\n\nYour list on this shelf includes: $matchedNames.';
     }
 
-    final desc = cleaned.isEmpty ? '' : 'App detected: $cleaned';
-
-    if (!targetFound) {
-      // No dialog for a miss: say it here (on-screen + TTS) and keep shopping.
-      final noMatch =
-          'No match found for "${target.name}" on this shelf. '
-          'If you are in the right aisle, keep moving along and scan the shelf again.';
-      if (!hasMatches) {
-        return desc.isEmpty ? noMatch : '$desc\n\n$noMatch';
-      }
-      if (desc.isEmpty) {
-        return 'Shelf text matched your list: $matchedNames.\n\n$noMatch';
-      }
-      return 'Shelf text matched your list: $matchedNames.\n\n$desc\n\n$noMatch';
+    // target != null && targetFound
+    final tName = target.name;
+    if (cleaned.isEmpty) {
+      return hasMatches
+          ? '$tName looks like a match. Shelf text also matched: $matchedNames.'
+          : '$tName looks like a match.';
     }
-
-    // Match: avoid repeating "looks like a match" here — [_showCheckOffItemDialog] only.
-    if (!hasMatches) {
-      return desc.isEmpty ? 'Shelf scan complete.' : desc;
-    }
-    if (desc.isEmpty) {
-      return 'Shelf text matched your list: $matchedNames.';
-    }
-    return 'Shelf text matched your list: $matchedNames.\n\n$desc';
+    return hasMatches
+        ? '$tName: $cleaned\n\nList matches on shelf text: $matchedNames.'
+        : '$tName: $cleaned';
   }
 
   bool _vlmAnswerMatchesTarget(String answer, _Item target) {
@@ -632,10 +705,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     setState(() => _loading = false);
 
     if (text == null) {
-      setState(() => _showAisleUnclearEmployeeOption = true);
-      await _speak(
-        'I could not read the aisle sign. Please retake the photo. If needed, tap Get Help from store employee.',
-      );
+      setState(() {
+        _showAisleUnclearEmployeeOption = true;
+        _aisleStatusMessage = _kUnreadableAisleMessage;
+      });
+      await _speak(_kUnreadableAisleMessage);
       await _clearPreviewAndRestartCamera();
       return;
     }
@@ -645,13 +719,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (!_looksLikeUsefulAisleText(text)) {
       setState(() {
         _phase = _Phase.aisleSign;
-        _aisleStatusMessage =
-            'Aisle sign not clear. Please retake the photo.';
+        _aisleStatusMessage = _kUnreadableAisleMessage;
         _showAisleUnclearEmployeeOption = true;
       });
-      await _speak(
-        'This aisle sign photo is not clear. Please retake the photo. If needed, tap Get Help from store employee.',
-      );
+      await _speak(_kUnreadableAisleMessage);
       await _clearPreviewAndRestartCamera();
       return;
     }
@@ -666,14 +737,80 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       item.aisle ??= _currentAisle;
     }
 
+    final aisleLabel = _readableAisleTitleFromOcr(text);
     setState(() {
       _phase = _Phase.aisleResults;
       _aisleStatusMessage = _aisleMatches.isEmpty
-          ? 'No items in this aisle.'
-          : 'Matched items: ${_aisleMatches.map((e) => e.name).join(", ")}';
+          ? 'You are in the $aisleLabel. No items from your list are in this aisle. Keep moving to the next aisle.'
+          : _aisleWalkInLine(_aisleMatches);
     });
 
     await _speak(_aisleStatusMessage);
+  }
+
+  Future<void> _voiceCommandScanAisle() async {
+    if (!mounted) return;
+    if (_loading || _takingPicture) {
+      await _speak('Wait for the current step to finish.');
+      return;
+    }
+    if (_shoppingMenuOpen) {
+      setState(() => _shoppingMenuOpen = false);
+    }
+    if (_fullScreenListOpen) {
+      _closeFullScreenList();
+    }
+    if (_phase == _Phase.aisleSign) {
+      await _onScanAisleSign();
+      return;
+    }
+    if (_phase == _Phase.aisleResults ||
+        _phase == _Phase.shelfResults ||
+        _phase == _Phase.shelf) {
+      setState(() {
+        _scanPreviewBytes = null;
+        _phase = _Phase.aisleSign;
+        _aisleStatusMessage = '';
+        _shelfStatusMessage = '';
+      });
+      await _restartCamera();
+      await _onScanAisleSign();
+    }
+  }
+
+  Future<void> _voiceCommandScanShelf() async {
+    if (!mounted) return;
+    if (_loading || _takingPicture) {
+      await _speak('Wait for the current step to finish.');
+      return;
+    }
+    if (_shoppingMenuOpen) {
+      setState(() => _shoppingMenuOpen = false);
+    }
+    if (_fullScreenListOpen) {
+      _closeFullScreenList();
+    }
+    if (_phase == _Phase.aisleSign) {
+      await _speak('Scan the aisle sign first, then you can scan a shelf.');
+      return;
+    }
+    if (_phase == _Phase.aisleResults) {
+      await _onGoToShelf();
+      return;
+    }
+    if (_phase == _Phase.shelf) {
+      await _onScanShelf();
+      return;
+    }
+    if (_phase == _Phase.shelfResults) {
+      setState(() {
+        _scanPreviewBytes = null;
+        _phase = _Phase.shelf;
+        _shelfStatusMessage = '';
+      });
+      await _restartCamera();
+      await _onScanShelf();
+    }
   }
 
   Future<void> _onGoToShelf() async {
@@ -722,15 +859,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (target != null) {
       question =
         'Do NOT read any text, labels, or signs. Use only visual appearance. '
-        'Check if any described item visually matches "${target.name}". If so, say the brand and product name/type, and give its aproximate shelf location (e.g. top left, middle right). Give just this 1 sentence, nothing else. '
-        'If it matches, end with: ITEM FOUND. '
-        'If not match then say: MOVE ALONG, NO ITEMS FOUND'
-        'Be concise and only include items you can clearly identify.';
+        'Check if any visible product visually matches "${target.name}" (include the exact type or flavor if that matters, not only the brand). '
+        'If it matches, give one short sentence with the full product name including flavor or variant if visible, and its approximate position using phrases like top shelf on the left or middle shelf on the right. '
+        'End with: ITEM FOUND. '
+        'If nothing matches, say: MOVE ALONG, NO ITEMS FOUND. '
+        'Be concise.';
     } else {
       question =
         'Do NOT read any text, labels, or signs. Use only visual appearance. '
-        'For each visible item, describe the brand and product name/type, and give its approximate shelf location (e.g., top left, middle right). '
-        'Be concise and only include items you can clearly identify for a low-vision user.';
+        'For each different product you can identify, give a separate short phrase: full product name including flavor or variant when you can tell (treat each flavor as a different item), '
+        'and approximate location using phrases like top shelf on the left or middle shelf on the right. '
+        'Do not group only by brand when flavors differ. '
+        'Be concise for a low-vision shopper.';
     }
 
     final vlmAnswer = await _runVlmPredict(bytes, question: question);
@@ -1018,25 +1158,29 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       return _itemMatchesText(item, aisleWords);
     }).toList();
 
+    final aisleLabel = _readableAisleTitleFromOcr(value);
     if (matches.isEmpty) {
       if (!mounted) return;
+      final msg =
+          'You are in the $aisleLabel. No items from your list are in this aisle. Keep moving to the next aisle.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'No items in this aisle.',
+            msg,
             style: const TextStyle(fontSize: 18),
           ),
         ),
       );
-      await _speak('No items in this aisle.');
+      await _speak(msg);
       return;
     }
 
+    final walkIn = _aisleWalkInLine(matches);
     setState(() {
       _currentAisleLabel = value;
       _phase = _Phase.aisleResults;
       _aisleOcrText = value;
-      _aisleStatusMessage = '';
+      _aisleStatusMessage = walkIn;
       _shelfOcrText = '';
       _aisleMatches = matches;
       _shelfMatches = [];
@@ -1048,10 +1192,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     for (final item in matches) {
       item.aisle ??= _currentAisle;
     }
-    final names = matches.map((e) => e.name).join(', ');
-    await _speak(
-      'Aisle $_currentAisleLabel selected. You have $names to find. Open the menu for your full list.',
-    );
+    await _speak(walkIn);
   }
 
   Future<void> _showSpokenAisleSheet({required bool employeeMode}) async {
@@ -1196,7 +1337,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                           if (c != null && !c.isCompleted) {
                             c.complete();
                           }
-                          await _speech.stop();
+                          await AppSpeech.I.stt.stop();
                         },
                         child: const Text(
                           'Stop listening',
@@ -1254,8 +1395,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       if (c != null && !c.isCompleted) {
         c.complete();
       }
-      if (_speech.isListening) {
-        await _speech.stop();
+      if (AppSpeech.I.stt.isListening) {
+        await AppSpeech.I.stt.stop();
       }
       // Avoid disposing immediately here: the dialog can still be in the
       // teardown/rebuild phase on web, and disposing too early can trigger
@@ -1344,21 +1485,23 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         );
       case _kMenuMute:
         return _largeMenuButton(
-          label: _audioEnabled ? 'Mute audio' : 'Unmute audio',
-          semanticLabel: _audioEnabled
-              ? 'Mute spoken feedback'
-              : 'Turn spoken feedback back on',
-          icon: _audioEnabled ? Icons.volume_up : Icons.volume_off,
+          label: AppVoicePolicy.ttsMuted ? 'Unmute audio' : 'Mute audio',
+          semanticLabel: AppVoicePolicy.ttsMuted
+              ? 'Turn spoken feedback back on'
+              : 'Mute spoken feedback',
+          icon: AppVoicePolicy.ttsMuted ? Icons.volume_off : Icons.volume_up,
           onPressed: () {
-            setState(() => _audioEnabled = !_audioEnabled);
-            if (!_audioEnabled) _tts.stop();
+            setState(() {
+              AppVoicePolicy.toggleMute();
+              if (AppVoicePolicy.ttsMuted) _tts.stop();
+            });
           },
         );
       case _kMenuList:
         return _largeMenuButton(
-          label: 'Shopping list & check off',
+          label: 'Shopping list',
           semanticLabel:
-              'Open full screen shopping list, check off items, and add items',
+              'Open full screen shopping list and add items',
           icon: Icons.checklist,
           onPressed: _openFullScreenListFromMenu,
         );
@@ -1503,7 +1646,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     } else {
       _lastSpoken = text;
     }
-    if (!_audioEnabled || !mounted) return;
+    if (AppVoicePolicy.ttsMuted || !mounted) return;
     await _tts.speak(text);
   }
 
@@ -1684,7 +1827,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                             ),
                           ),
                           subtitle: Text(
-                            item.category,
+                            'Section: ${item.category}',
                             style: const TextStyle(fontSize: 22),
                           ),
                           controlAffinity: ListTileControlAffinity.leading,
@@ -1862,6 +2005,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   Widget _buildAisleResults() {
     final preview = _scanPreviewBytes;
+    final showWalkInBanner =
+        preview != null && _aisleMatches.isNotEmpty && _aisleStatusMessage.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1870,8 +2015,33 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             flex: 5,
             child: DecoratedBox(
               decoration: const BoxDecoration(color: Colors.black),
-              child: Center(
-                child: Image.memory(preview, fit: BoxFit.contain),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Center(
+                    child: Image.memory(preview, fit: BoxFit.contain),
+                  ),
+                  if (showWalkInBanner)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.88),
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+                        child: Text(
+                          _aisleStatusMessage,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -1892,10 +2062,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'Open the Menu for your full shopping list and to check items off.',
-                  style: TextStyle(fontSize: 22, height: 1.35),
-                ),
+                if (_aisleMatches.isNotEmpty)
+                  const Text(
+                    'Open the Menu for your full shopping list. You can check off items there after you find them on the shelf.',
+                    style: TextStyle(fontSize: 22, height: 1.35),
+                  ),
                 if (_aisleMatches.isEmpty) ...[
                   const SizedBox(height: 16),
                   SizedBox(
@@ -1927,7 +2098,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          child: const Text('Go To Shelf Scan'),
+                          child: const Text('Scan Shelf'),
                         ),
                       ),
                     ),
@@ -1962,7 +2133,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         _lastShelfTargetName != null && !_lastShelfTargetFound;
     final preview = _scanPreviewBytes;
     final statusText = _shelfStatusMessage.isEmpty
-        ? 'Scan complete. Open the Menu for your list.'
+        ? 'Shelf scan finished.'
         : _shelfStatusMessage;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1994,10 +2165,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'Use the Menu to see all items and check them off.',
-                  style: TextStyle(fontSize: 22, height: 1.35),
-                ),
+                if (_lastShelfTargetFound ||
+                    _shelfMatches.isNotEmpty)
+                  const Text(
+                    'Use the Menu to see your full list. You can check off items there after they are detected on the shelf.',
+                    style: TextStyle(fontSize: 22, height: 1.35),
+                  ),
                 const Spacer(),
                 Row(
                   children: [
@@ -2015,7 +2188,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                           child: Text(
                             shouldShowMoveAlongRescan
                                 ? 'Move Along Aisle & Re-Scan'
-                                : 'Scan Another Shelf',
+                                : 'Scan Shelf',
                           ),
                         ),
                       ),

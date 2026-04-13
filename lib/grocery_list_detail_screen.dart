@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 
+import 'app_speech.dart';
+import 'app_voice_policy.dart';
 import 'main.dart';
+import 'shopping_voice_host.dart';
 
 /// Displays items in a grocery list and allows adding / toggling / deleting
 /// them. Items can be added manually (typed) or via a guided voice flow where
@@ -30,19 +32,39 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
   String? _error;
 
   final FlutterTts _tts = FlutterTts();
-  final SpeechToText _speech = SpeechToText();
   bool _speechAvailable = false;
+  ShoppingVoiceHost? _listVoiceHost;
 
   @override
   void initState() {
     super.initState();
     _fetchItems();
     _initSpeech();
+    if (!VlmShoppingSession.active) {
+      _listVoiceHost = ShoppingVoiceHost(
+        onEndShopping: () async {
+          if (!mounted) return;
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        },
+        onOpenShoppingList: () async {
+          if (!mounted) return;
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        },
+        onOpenAddItem: () async {
+          if (!mounted) return;
+          _showInputModeDialog();
+        },
+      )..mount();
+    }
   }
 
   Future<void> _initSpeech() async {
     try {
-      _speechAvailable = await _speech.initialize(
+      _speechAvailable = await AppSpeech.I.ensureInitialized(
         onError: (_) {},
         onStatus: (_) {},
       );
@@ -54,8 +76,9 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
 
   @override
   void dispose() {
+    _listVoiceHost?.unmount();
     _tts.stop();
-    _speech.stop();
+    AppSpeech.I.stt.stop();
     super.dispose();
   }
 
@@ -312,7 +335,6 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
       ),
       builder: (_) => _VoiceEntrySheet(
         tts: _tts,
-        speech: _speech,
         onItemAdded: (name, category) => _addItem(name, category),
       ),
     );
@@ -423,6 +445,10 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                                     color: Colors.white,
                                   ),
                                 ),
+                                subtitle: Text(
+                                  'Section: ${item['category'] as String? ?? 'Other'}',
+                                  style: const TextStyle(fontSize: 18),
+                                ),
                                 trailing: IconButton(
                                   tooltip: 'Delete item',
                                   icon: Icon(Icons.delete_outline,
@@ -453,12 +479,10 @@ enum _VoiceStep { name, category, done }
 
 class _VoiceEntrySheet extends StatefulWidget {
   final FlutterTts tts;
-  final SpeechToText speech;
   final void Function(String name, String category) onItemAdded;
 
   const _VoiceEntrySheet({
     required this.tts,
-    required this.speech,
     required this.onItemAdded,
   });
 
@@ -515,8 +539,8 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
     setState(() => _step = _VoiceStep.category);
 
     await _speak(
-      'What section is $_itemName in? Type your section in the box, or tap '
-      'the microphone to say it. You can use any section name. When ready, '
+      'What aisle or section is $_itemName in? Type your answer in the box, '
+      'or tap the microphone to say it. You can use any section name. When ready, '
       'tap Add to list.',
     );
   }
@@ -524,7 +548,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   Future<void> _speak(String text) async {
-    if (!mounted || _cancelled) return;
+    if (!mounted || _cancelled || AppVoicePolicy.ttsMuted) return;
     setState(() {
       _isSpeaking = true;
       _prompt = text;
@@ -541,7 +565,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
 
     final completer = Completer<String>();
 
-    await widget.speech.listen(
+    await AppSpeech.I.stt.listen(
       onResult: (result) {
         if (mounted) setState(() => _recognized = result.recognizedWords);
         if (result.finalResult && !completer.isCompleted) {
@@ -556,7 +580,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
     final result = await completer.future.timeout(
       const Duration(seconds: 13),
       onTimeout: () {
-        widget.speech.stop();
+        AppSpeech.I.stt.stop();
         return _recognized;
       },
     );
@@ -567,13 +591,13 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
 
   Future<void> _listenForCategoryField() async {
     if (_cancelled || !mounted || _listeningCategory) return;
-    await widget.speech.stop();
+    await AppSpeech.I.stt.stop();
     _recognized = '';
     setState(() => _listeningCategory = true);
 
     final completer = Completer<String>();
 
-    await widget.speech.listen(
+    await AppSpeech.I.stt.listen(
       onResult: (result) {
         if (mounted) setState(() => _recognized = result.recognizedWords);
         if (result.finalResult && !completer.isCompleted) {
@@ -588,7 +612,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
     final result = await completer.future.timeout(
       const Duration(seconds: 13),
       onTimeout: () {
-        widget.speech.stop();
+        AppSpeech.I.stt.stop();
         return _recognized;
       },
     );
@@ -634,7 +658,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
   void _cancel() {
     _cancelled = true;
     widget.tts.stop();
-    widget.speech.stop();
+    AppSpeech.I.stt.stop();
     if (mounted) Navigator.pop(context);
   }
 

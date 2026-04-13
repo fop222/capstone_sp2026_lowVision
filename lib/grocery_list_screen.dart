@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'app_speech.dart';
 import 'main.dart';
 import 'take_picture_screen.dart';
 import 'grocery_list_detail_screen.dart';
@@ -21,11 +24,22 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   List<Map<String, dynamic>> _lists = [];
   bool _loading = true;
   String? _error;
+  bool _speechAvailable = false;
 
   @override
   void initState() {
     super.initState();
     _fetchLists();
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      _speechAvailable = await AppSpeech.I.ensureInitialized();
+    } catch (_) {
+      _speechAvailable = false;
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _fetchLists() async {
@@ -117,30 +131,94 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
 
   void _showCreateDialog() {
     final titleController = TextEditingController();
+    var listening = false;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('New grocery list'),
-        content: TextField(
-          controller: titleController,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'List title'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          title: const Text('New grocery list'),
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: titleController,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: 'List title'),
+                  onChanged: (_) => setModal(() {}),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Speak list name',
+                icon: Icon(
+                  listening ? Icons.mic : Icons.mic_none,
+                  size: 28,
+                ),
+                onPressed: (!_speechAvailable || listening)
+                    ? null
+                    : () async {
+                        setModal(() => listening = true);
+                        await AppSpeech.I.stt.stop();
+                        final completer = Completer<String>();
+                        var heard = '';
+                        try {
+                          await AppSpeech.I.stt.listen(
+                            onResult: (result) {
+                              heard = result.recognizedWords;
+                              if (result.finalResult &&
+                                  !completer.isCompleted) {
+                                completer.complete(result.recognizedWords);
+                              }
+                            },
+                            listenFor: const Duration(seconds: 12),
+                            pauseFor: const Duration(seconds: 3),
+                            cancelOnError: true,
+                            partialResults: true,
+                          );
+                          final text = await completer.future.timeout(
+                            const Duration(seconds: 14),
+                            onTimeout: () {
+                              unawaited(AppSpeech.I.stt.stop());
+                              return heard;
+                            },
+                          );
+                          await AppSpeech.I.stt.stop();
+                          final t = text.trim();
+                          if (t.isNotEmpty && ctx.mounted) {
+                            final cur = titleController.text.trim();
+                            titleController.text = cur.isEmpty
+                                ? t
+                                : '$cur ${t.trim()}'.trim();
+                            titleController.selection =
+                                TextSelection.collapsed(
+                                    offset: titleController.text.length);
+                          }
+                        } finally {
+                          if (ctx.mounted) {
+                            setModal(() => listening = false);
+                          }
+                        }
+                      },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final title = titleController.text.trim();
+                if (title.isEmpty) return;
+                Navigator.pop(ctx);
+                _createList(title);
+              },
+              child: const Text('Create'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final title = titleController.text.trim();
-              if (title.isEmpty) return;
-              Navigator.pop(ctx);
-              _createList(title);
-            },
-            child: const Text('Create'),
-          ),
-        ],
       ),
     );
   }

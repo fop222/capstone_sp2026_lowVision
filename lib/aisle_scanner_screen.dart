@@ -1009,7 +1009,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                                 await _autoAdvanceAfterManualCheckoff(item);
                               },
                               title: Text(item.name),
-                              subtitle: Text(item.category),
+                              subtitle: Text('Section: ${item.category}'),
                               controlAffinity: ListTileControlAffinity.leading,
                             ),
                           )
@@ -1471,7 +1471,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                                 color: Colors.white,
                               ),
                             ),
-                            subtitle: Text(item.category,
+                            subtitle: Text('Section: ${item.category}',
                                 style: const TextStyle(fontSize: 18)),
                             controlAffinity: ListTileControlAffinity.leading,
                           ))
@@ -1601,7 +1601,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                                 color: Colors.white,
                               ),
                             ),
-                            subtitle: Text(item.category,
+                            subtitle: Text('Section: ${item.category}',
                                 style: const TextStyle(fontSize: 18)),
                             secondary: Icon(
                               item.isChecked
@@ -1709,7 +1709,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                       title: Text(item.name,
                           style: const TextStyle(
                               fontSize: 20, color: Colors.white)),
-                      subtitle: Text(item.category,
+                      subtitle: Text('Section: ${item.category}',
                           style: const TextStyle(
                               fontSize: 16, color: Colors.white60)),
                       trailing: Checkbox(
