@@ -138,6 +138,47 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
     } catch (_) {}
   }
 
+  Future<void> _confirmDeleteItem(
+      String itemId, String itemName) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete item'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Are you sure you want to delete this item?',
+              style: TextStyle(fontSize: 20),
+            ),
+            if (itemName.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                itemName.trim(),
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) await _deleteItem(itemId);
+  }
+
   Future<void> _deleteItem(String itemId) async {
     try {
       await supabase.from('grocery_items').delete().eq('id', itemId);
@@ -445,17 +486,15 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                                     color: Colors.white,
                                   ),
                                 ),
-                                subtitle: Text(
-                                  'Section: ${item['category'] as String? ?? 'Other'}',
-                                  style: const TextStyle(fontSize: 18),
-                                ),
                                 trailing: IconButton(
                                   tooltip: 'Delete item',
                                   icon: Icon(Icons.delete_outline,
                                       size: 32,
                                       color: theme.colorScheme.error),
-                                  onPressed: () =>
-                                      _deleteItem(item['id'] as String),
+                                  onPressed: () => _confirmDeleteItem(
+                                    item['id'] as String,
+                                    item['name'] as String? ?? '',
+                                  ),
                                 ),
                               );
                             }),
@@ -846,8 +885,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
                   Chip(
                     avatar: const Icon(Icons.check_circle,
                         size: 16, color: Color(0xFF3AE4C2)),
-                    label: Text(
-                        'Section: ${_categoryController.text.trim()}'),
+                    label: Text(_categoryController.text.trim()),
                   ),
               ],
             ),

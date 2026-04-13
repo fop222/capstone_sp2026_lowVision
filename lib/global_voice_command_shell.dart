@@ -171,7 +171,7 @@ class _GlobalVoiceCommandShellState extends State<GlobalVoiceCommandShell> {
 
     setState(() {
       _listening = true;
-      _statusBanner = 'Listening for command…';
+      _statusBanner = null;
     });
 
     final completer = Completer<String>();
@@ -261,9 +261,7 @@ class _GlobalVoiceCommandShellState extends State<GlobalVoiceCommandShell> {
                           _listening ? Icons.mic : Icons.mic_none,
                           color: Colors.black,
                           size: 30,
-                          semanticLabel: _listening
-                              ? 'Listening for voice command'
-                              : 'Voice commands',
+                          semanticLabel: 'Voice commands',
                         ),
                       ),
                     ),

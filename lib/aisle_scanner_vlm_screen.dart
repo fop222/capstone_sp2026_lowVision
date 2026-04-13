@@ -1826,10 +1826,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                               color: Colors.white,
                             ),
                           ),
-                          subtitle: Text(
-                            'Section: ${item.category}',
-                            style: const TextStyle(fontSize: 22),
-                          ),
                           controlAffinity: ListTileControlAffinity.leading,
                         ),
                       )
@@ -2005,8 +2001,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   Widget _buildAisleResults() {
     final preview = _scanPreviewBytes;
-    final showWalkInBanner =
-        preview != null && _aisleMatches.isNotEmpty && _aisleStatusMessage.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2015,33 +2009,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             flex: 5,
             child: DecoratedBox(
               decoration: const BoxDecoration(color: Colors.black),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Center(
-                    child: Image.memory(preview, fit: BoxFit.contain),
-                  ),
-                  if (showWalkInBanner)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.88),
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-                        child: Text(
-                          _aisleStatusMessage,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            height: 1.3,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
+              child: Center(
+                child: Image.memory(preview, fit: BoxFit.contain),
               ),
             ),
           ),
@@ -2058,15 +2027,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   child: Text(
                     _aisleStatusMessage,
                     style: const TextStyle(
-                        fontSize: 26, fontWeight: FontWeight.w700),
+                      fontSize: 32,
+                      fontWeight: FontWeight.w800,
+                      height: 1.25,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                if (_aisleMatches.isNotEmpty)
-                  const Text(
-                    'Open the Menu for your full shopping list. You can check off items there after you find them on the shelf.',
-                    style: TextStyle(fontSize: 22, height: 1.35),
-                  ),
                 if (_aisleMatches.isEmpty) ...[
                   const SizedBox(height: 16),
                   SizedBox(
@@ -2164,13 +2130,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                         fontSize: 26, fontWeight: FontWeight.w700),
                   ),
                 ),
-                const SizedBox(height: 12),
-                if (_lastShelfTargetFound ||
-                    _shelfMatches.isNotEmpty)
-                  const Text(
-                    'Use the Menu to see your full list. You can check off items there after they are detected on the shelf.',
-                    style: TextStyle(fontSize: 22, height: 1.35),
-                  ),
                 const Spacer(),
                 Row(
                   children: [
