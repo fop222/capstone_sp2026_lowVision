@@ -1,17 +1,20 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
-/// English-only TTS: set language once and use the engine default voice.
-/// Avoids [FlutterTts.setVoice] so prompts and read-aloud use the same voice.
+/// English-only TTS: one stable voice for prompts and read-aloud.
+///
+/// On **web (especially iOS Safari)**, `speechSynthesis.getVoices()` is often
+/// empty on the first call and returns voices asynchronously. The plugin’s
+/// [FlutterTts.setLanguage] uses `.first` on a fuzzy match, so the chosen voice
+/// can change between sessions. We wait for voices, sort candidates
+/// deterministically, then [FlutterTts.setVoice] once.
 Future<void> applyEnglishTts(FlutterTts tts) async {
   try {
     await tts.awaitSpeakCompletion(true);
   } catch (_) {}
 
   if (kIsWeb) {
-    try {
-      await tts.setLanguage('en-US');
-    } catch (_) {}
+    await _pinEnglishVoiceWeb(tts);
     return;
   }
 
@@ -35,6 +38,78 @@ Future<void> applyEnglishTts(FlutterTts tts) async {
       return;
     } catch (_) {}
   }
+}
+
+/// Wait for Safari / WebKit to populate voices, then pick one stable en voice.
+Future<void> _pinEnglishVoiceWeb(FlutterTts tts) async {
+  await _tryPinEnglishVoiceOnce(tts);
+  // iOS Safari often fires `voiceschanged` shortly after load; pin again so we
+  // don't keep using the browser default for early utterances vs later ones.
+  await Future<void>.delayed(const Duration(milliseconds: 700));
+  await _tryPinEnglishVoiceOnce(tts);
+}
+
+/// Returns true if a voice was applied from a non-empty list.
+Future<bool> _tryPinEnglishVoiceOnce(FlutterTts tts) async {
+  List<dynamic>? list;
+  for (var i = 0; i < 12; i++) {
+    try {
+      final raw = await tts.getVoices;
+      if (raw is List && raw.isNotEmpty) {
+        list = raw;
+        break;
+      }
+    } catch (_) {}
+    await Future<void>.delayed(Duration(milliseconds: i < 4 ? 40 : 80));
+  }
+
+  final candidates = <Map<String, String>>[];
+  if (list != null) {
+    for (final e in list) {
+      if (e is! Map) continue;
+      final m = Map<String, dynamic>.from(e);
+      final name = '${m['name'] ?? ''}'.trim();
+      final locale = '${m['locale'] ?? ''}'.trim();
+      if (name.isEmpty || locale.isEmpty) continue;
+      final low = locale.toLowerCase();
+      if (low.startsWith('en')) {
+        candidates.add({'name': name, 'locale': locale});
+      }
+    }
+  }
+
+  candidates.sort((a, b) {
+    final ka = '${a['locale']}|${a['name']}';
+    final kb = '${b['locale']}|${b['name']}';
+    return ka.compareTo(kb);
+  });
+
+  Map<String, String>? pick;
+  for (final c in candidates) {
+    if ((c['locale'] ?? '').toLowerCase().startsWith('en-us')) {
+      pick = c;
+      break;
+    }
+  }
+  pick ??= candidates.isNotEmpty ? candidates.first : null;
+
+  if (pick != null) {
+    try {
+      await tts.setVoice({
+        'name': pick['name']!,
+        'locale': pick['locale']!,
+      });
+      try {
+        await tts.setLanguage(pick['locale']!);
+      } catch (_) {}
+      return true;
+    } catch (_) {}
+  }
+
+  try {
+    await tts.setLanguage('en-US');
+  } catch (_) {}
+  return false;
 }
 
 /// Locale for [SpeechToText.listen] in English.
