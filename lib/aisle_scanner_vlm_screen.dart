@@ -340,9 +340,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
 
-      Future<bool>? listenFuture;
+      late final Future<dynamic> listenSession;
+      final listenDone = Completer<void>();
       try {
-        listenFuture = AppSpeech.I.stt.listen(
+        listenSession = AppSpeech.I.stt.listen(
           onResult: (result) {
             recognized = result.recognizedWords;
             if (recognized.isNotEmpty) {
@@ -373,16 +374,24 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         return '';
       }
 
+      listenSession
+          .then((_) {
+            if (!listenDone.isCompleted) listenDone.complete();
+          })
+          .catchError((Object _, StackTrace __) {
+            if (!listenDone.isCompleted) listenDone.complete();
+          });
+
       await Future.any<void>([
         stopRequested.future,
-        listenFuture,
+        listenDone.future,
       ]);
 
       if (AppSpeech.I.stt.isListening) {
         await AppSpeech.I.stt.stop();
       }
       try {
-        await listenFuture;
+        await listenSession;
       } catch (_) {}
 
       if (kIsWeb) {
