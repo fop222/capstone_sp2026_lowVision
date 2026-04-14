@@ -174,6 +174,54 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
     }
   }
 
+  Future<void> _editItemName(String itemId, String currentName) async {
+    final c = TextEditingController(text: currentName);
+    final next = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit item name'),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Item name',
+            hintText: 'e.g. Milk',
+          ),
+          style: const TextStyle(fontSize: 22),
+          textCapitalization: TextCapitalization.words,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (next == null || next.isEmpty) return;
+    if (next == currentName.trim()) return;
+    try {
+      await supabase
+          .from('grocery_items')
+          .update({'name': next})
+          .eq('id', itemId)
+          .eq('list_id', widget.listId);
+      _fetchItems();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not update name: $e'),
+          backgroundColor: const Color(0xFFFF6B6B),
+        ),
+      );
+    }
+  }
+
   Future<void> _renameList() async {
     final c = TextEditingController(text: _listTitle);
     final next = await showDialog<String>(
@@ -735,19 +783,38 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                           ],
                         ),
                       ),
-                      trailing: Tooltip(
-                        message: 'Delete item',
-                        child: IconButton(
-                          icon: Icon(
-                            Icons.delete_outline_rounded,
-                            size: 30,
-                            color: theme.colorScheme.error,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Tooltip(
+                            message: 'Edit name',
+                            child: IconButton(
+                              icon: Icon(
+                                Icons.edit_outlined,
+                                size: 28,
+                                color: theme.colorScheme.primary,
+                              ),
+                              onPressed: () => _editItemName(
+                                item['id'] as String,
+                                item['name'] as String? ?? '',
+                              ),
+                            ),
                           ),
-                          onPressed: () => _confirmDeleteItem(
-                            item['id'] as String,
-                            item['name'] as String? ?? '',
+                          Tooltip(
+                            message: 'Delete item',
+                            child: IconButton(
+                              icon: Icon(
+                                Icons.delete_outline_rounded,
+                                size: 28,
+                                color: theme.colorScheme.error,
+                              ),
+                              onPressed: () => _confirmDeleteItem(
+                                item['id'] as String,
+                                item['name'] as String? ?? '',
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ),
