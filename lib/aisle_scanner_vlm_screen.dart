@@ -318,8 +318,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Listens for an aisle name until **Stop listening** is tapped (or a long
-  /// safety timeout). [pauseFor] stays null so silence does not end the session.
+  /// [SpeechToText.listen]’s Future completes when the session **starts**, not
+  /// when it ends—never use that Future as “done” or the mic stops immediately.
+  Future<void> _waitUntilSpeechListenEndsOrStop() async {
+    final stop = _stopAisleListenRequested;
+    while (AppSpeech.I.stt.isListening) {
+      if (stop != null && stop.isCompleted) break;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
+  /// Listens for an aisle name until **Stop listening** is tapped (or the
+  /// platform ends the session / listenFor timeout). [pauseFor] stays null.
   Future<String> _listenForSpokenAislePhrase({
     void Function(String partial)? onPartial,
   }) async {
@@ -327,7 +337,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     await _tts.stop();
     await Future<void>.delayed(
-      Duration(milliseconds: kIsWeb ? 1400 : 600),
+      Duration(milliseconds: kIsWeb ? 1800 : 800),
     );
 
     var recognized = '';
@@ -337,13 +347,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     try {
       if (AppSpeech.I.stt.isListening) {
         await AppSpeech.I.stt.stop();
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await Future<void>.delayed(const Duration(milliseconds: 250));
       }
 
-      late final Future<dynamic> listenSession;
-      final listenDone = Completer<void>();
       try {
-        listenSession = AppSpeech.I.stt.listen(
+        await AppSpeech.I.stt.listen(
           onResult: (result) {
             recognized = result.recognizedWords;
             if (recognized.isNotEmpty) {
@@ -354,8 +362,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
           pauseFor: null,
           localeId: englishSpeechToTextLocaleId(),
           listenOptions: SpeechListenOptions(
-            listenMode:
-                kIsWeb ? ListenMode.confirmation : ListenMode.dictation,
+            listenMode: ListenMode.dictation,
             partialResults: true,
             cancelOnError: false,
           ),
@@ -374,25 +381,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         return '';
       }
 
-      listenSession
-          .then((_) {
-            if (!listenDone.isCompleted) listenDone.complete();
-          })
-          .catchError((Object _, StackTrace __) {
-            if (!listenDone.isCompleted) listenDone.complete();
-          });
+      if (!AppSpeech.I.stt.isListening) {
+        return recognized.trim();
+      }
 
       await Future.any<void>([
         stopRequested.future,
-        listenDone.future,
+        _waitUntilSpeechListenEndsOrStop(),
       ]);
 
       if (AppSpeech.I.stt.isListening) {
         await AppSpeech.I.stt.stop();
       }
-      try {
-        await listenSession;
-      } catch (_) {}
 
       if (kIsWeb) {
         await Future<void>.delayed(const Duration(milliseconds: 2500));
@@ -1159,11 +1159,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         shelfUser =
             'Could not confirm $wanted on this shelf. Tap Scan Shelf to try again.';
       } else {
-        final got = _englishNameList(foundTargets.map((e) => e.name).toList());
         final deduped = _shelfDisplayFromVlmAnswer(vlmAnswer);
         shelfUser = deduped.isEmpty
-            ? 'Spotted list items: $got.'
-            : 'Spotted list items: $got.\n\nOn this shelf: $deduped';
+            ? 'On this shelf: looks like a match for something on your list.'
+            : 'On this shelf: $deduped';
       }
     } else if (singleTarget != null) {
       final targetFound = foundTargets.isNotEmpty;
@@ -2521,7 +2520,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 onPressed: _onGoToShelf,
                 style: ElevatedButton.styleFrom(
                   textStyle: const TextStyle(
-                    fontSize: 20,
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
