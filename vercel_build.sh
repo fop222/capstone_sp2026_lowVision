@@ -21,7 +21,7 @@ flutter pub get
 # Build for Flutter web. (Default renderer is fine; override via env if desired.)
 BASE_HREF="${FLUTTER_BASE_HREF:-/}"
 
-BUILD_ARGS=(--release --base-href "$BASE_HREF")
+BUILD_ARGS=(--release --base-href "$BASE_HREF" --no-wasm-dry-run)
 
 # Optional: pass OCR_BASE_URL at build time. If not set, web will default to the
 # same-origin `/api/ocr` proxy route.
@@ -31,4 +31,3 @@ if [ -n "$OCR_BASE_URL_VALUE" ]; then
 fi
 
 flutter build web "${BUILD_ARGS[@]}"
-
