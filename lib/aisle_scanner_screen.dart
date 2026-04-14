@@ -9,6 +9,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
+import 'aisle_category_group.dart';
 import 'app_colors.dart';
 import 'app_tts.dart';
 import 'main.dart';
@@ -33,7 +34,7 @@ class _Item {
   static _Item fromMap(Map<String, dynamic> m) => _Item(
         id: m['id'] as String? ?? '',
         name: m['name'] as String? ?? '',
-        category: m['category'] as String? ?? 'Other',
+        category: categoryFromItemMap(m),
         isChecked: m['is_checked'] as bool? ?? false,
       );
 }
@@ -462,12 +463,6 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     return false;
   }
 
-  String _categoryGroupKey(String category) {
-    final c = category.trim().toLowerCase();
-    if (c.isEmpty || c == 'other') return '';
-    return c;
-  }
-
   List<_Item> _matchItems(String ocrText) {
     final signWords = _tokenize(ocrText);
     final unchecked = _items.where((item) => !item.isChecked).toList();
@@ -477,12 +472,12 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     for (final item in unchecked) {
       if (_itemMatchesSign(item, signWords)) {
         byId[item.id] = item;
-        final key = _categoryGroupKey(item.category);
+        final key = categoryGroupKeyForMatching(item.category);
         if (key.isNotEmpty) categoriesHit.add(key);
       }
     }
     for (final item in unchecked) {
-      final key = _categoryGroupKey(item.category);
+      final key = categoryGroupKeyForMatching(item.category);
       if (key.isNotEmpty && categoriesHit.contains(key)) {
         byId[item.id] = item;
       }

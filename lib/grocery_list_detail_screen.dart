@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import 'aisle_category_group.dart';
 import 'app_tts.dart';
 import 'app_speech.dart';
 import 'app_voice_policy.dart';
@@ -395,10 +396,15 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
   Widget build(BuildContext context) {
     final grouped = <String, List<Map<String, dynamic>>>{};
     for (final item in _items) {
-      final cat = item['category'] as String? ?? 'Other';
-      grouped.putIfAbsent(cat, () => []).add(item);
+      final bucket = categoryBucketKeyFromRaw(categoryFromItemMap(item));
+      grouped.putIfAbsent(bucket, () => []).add(item);
     }
-    final sortedCategories = grouped.keys.toList()..sort();
+    final sortedCategories = grouped.keys.toList()
+      ..sort((a, b) {
+        if (a == categoryOtherBucketKey) return 1;
+        if (b == categoryOtherBucketKey) return -1;
+        return a.compareTo(b);
+      });
 
     final theme = Theme.of(context);
     return Scaffold(
@@ -459,8 +465,8 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                       padding: const EdgeInsets.only(bottom: 80),
                       itemCount: sortedCategories.length,
                       itemBuilder: (_, ci) {
-                        final cat = sortedCategories[ci];
-                        final catItems = grouped[cat]!;
+                        final bucket = sortedCategories[ci];
+                        final catItems = grouped[bucket]!;
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -468,7 +474,8 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                               padding:
                                   const EdgeInsets.fromLTRB(20, 20, 20, 6),
                               child: Text(
-                                cat.toUpperCase(),
+                                displayCategorySectionTitle(bucket)
+                                    .toUpperCase(),
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,

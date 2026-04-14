@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import 'aisle_category_group.dart';
 import 'app_tts.dart';
 import 'app_speech.dart';
 import 'app_voice_policy.dart';
@@ -38,7 +39,7 @@ class _Item {
   static _Item fromMap(Map<String, dynamic> m) => _Item(
         id: m['id'] as String? ?? '',
         name: m['name'] as String? ?? '',
-        category: m['category'] as String? ?? 'Other',
+        category: categoryFromItemMap(m),
         isChecked: m['is_checked'] as bool? ?? false,
       );
 }
@@ -99,7 +100,7 @@ String _aisleScanFeedback({
     return _noListMatchesInAisleMessage(rawAisleText);
   }
   final itemsLine = _aisleItemsToFindLine(matches);
-  return 'You are in the $label aisle. This is the right aisle for your list. '
+  return 'You are in the $label aisle. '
       '$itemsLine Walk in and tap Scan Shelf when you are ready.';
 }
 
