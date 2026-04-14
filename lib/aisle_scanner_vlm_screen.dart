@@ -2520,7 +2520,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 onPressed: _onGoToShelf,
                 style: ElevatedButton.styleFrom(
                   textStyle: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 20,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

@@ -12,10 +12,21 @@ class AppSpeech {
   Future<bool> ensureInitialized({
     void Function(dynamic err)? onError,
     void Function(String)? onStatus,
-  }) {
-    return _init ??= stt.initialize(
+  }) async {
+    if (_init != null) {
+      final ok = await _init!;
+      if (ok) return true;
+      _init = null;
+    }
+    final next = stt.initialize(
       onError: onError ?? (_) {},
       onStatus: onStatus ?? (_) {},
     );
+    _init = next;
+    final result = await next;
+    if (!result) {
+      _init = null;
+    }
+    return result;
   }
 }
