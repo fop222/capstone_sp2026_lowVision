@@ -237,10 +237,15 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
                       foregroundColor: Colors.white,
                       textStyle: theme.textTheme.bodyMedium,
                     ),
-                    child: Text(
-                      _isSignup
-                          ? 'Already have an account? Log in'
-                          : 'Need an account? Sign up',
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        _isSignup
+                            ? 'Already have an account? Log in'
+                            : 'Need an account? Sign up',
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
                 ],

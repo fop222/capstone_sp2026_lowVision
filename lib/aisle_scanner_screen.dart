@@ -462,12 +462,34 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     return false;
   }
 
+  String _categoryGroupKey(String category) {
+    final c = category.trim().toLowerCase();
+    if (c.isEmpty || c == 'other') return '';
+    return c;
+  }
+
   List<_Item> _matchItems(String ocrText) {
     final signWords = _tokenize(ocrText);
-    return _items.where((item) {
-      if (item.isChecked) return false;
-      return _itemMatchesSign(item, signWords);
-    }).toList();
+    final unchecked = _items.where((item) => !item.isChecked).toList();
+    final byId = <String, _Item>{};
+    final categoriesHit = <String>{};
+
+    for (final item in unchecked) {
+      if (_itemMatchesSign(item, signWords)) {
+        byId[item.id] = item;
+        final key = _categoryGroupKey(item.category);
+        if (key.isNotEmpty) categoriesHit.add(key);
+      }
+    }
+    for (final item in unchecked) {
+      final key = _categoryGroupKey(item.category);
+      if (key.isNotEmpty && categoriesHit.contains(key)) {
+        byId[item.id] = item;
+      }
+    }
+
+    final out = byId.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+    return out;
   }
 
   _Item? get _currentShelfTarget {
@@ -930,11 +952,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       return;
     }
 
-    final aisleWords = _tokenize(value);
-    final matches = _items.where((item) {
-      if (item.isChecked) return false;
-      return _itemMatchesSign(item, aisleWords);
-    }).toList();
+    final matches = _matchItems(value);
 
     if (matches.isEmpty) {
       if (!mounted) return;

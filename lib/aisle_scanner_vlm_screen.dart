@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -74,17 +75,32 @@ String _noListMatchesInAisleMessage(String rawAisleText) {
   return 'You are in the $label. No items from your list are in this aisle. Keep moving to the next aisle.';
 }
 
-String _aisleWalkInLine(List<_Item> matches) {
-  final names = matches.map((e) => e.name).toList();
+String _aisleItemsToFindLine(List<_Item> matches) {
+  final names = matches.map((e) => e.name).toList()..sort();
   if (names.isEmpty) return '';
   if (names.length == 1) {
-    return '${names.first} is in this aisle. Walk into it.';
+    return 'Item to find here: ${names.first}.';
   }
   if (names.length == 2) {
-    return '${names[0]} and ${names[1]} are in this aisle. Walk into it.';
+    return 'Items to find here: ${names[0]} and ${names[1]}.';
   }
   final allButLast = names.sublist(0, names.length - 1).join(', ');
-  return '$allButLast, and ${names.last} are in this aisle. Walk into it.';
+  return 'Items to find here: $allButLast, and ${names.last}.';
+}
+
+/// Spoken feedback after reading an aisle sign: always names the aisle and
+/// confirms when list items match.
+String _aisleScanFeedback({
+  required String rawAisleText,
+  required List<_Item> matches,
+}) {
+  final label = _readableAisleTitleFromOcr(rawAisleText);
+  if (matches.isEmpty) {
+    return _noListMatchesInAisleMessage(rawAisleText);
+  }
+  final itemsLine = _aisleItemsToFindLine(matches);
+  return 'You are in the $label aisle. This is the right aisle for your list. '
+      '$itemsLine Walk in and tap Scan Shelf when you are ready.';
 }
 
 String _humanizeShelfLocationPhrases(String input) {
@@ -595,18 +611,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       if (!hasMatches) {
         return cleaned.isEmpty
             ? 'Nothing clear on this shelf yet.'
-            : cleaned;
+            : 'On this shelf: $cleaned';
       }
       return cleaned.isEmpty
           ? 'Nothing clear on this shelf yet.'
-          : cleaned;
+          : 'On this shelf: $cleaned';
     }
 
     // target != null && targetFound — show vision description only (no name prefix).
     if (cleaned.isEmpty) {
       return 'Looks like a match.';
     }
-    return cleaned;
+    return 'On this shelf: $cleaned';
   }
 
   bool _vlmAnswerMatchesTarget(String answer, _Item target) {
@@ -721,12 +737,39 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     return false;
   }
 
+  /// Categories like [Other] do not merge list items; real categories group
+  /// for "any of these in this aisle" matching.
+  String _categoryGroupKey(String category) {
+    final c = category.trim().toLowerCase();
+    if (c.isEmpty || c == 'other') return '';
+    return c;
+  }
+
+  /// If any unchecked item in a category matches the scanned text, every
+  /// unchecked item in that category is included (e.g. Red Bull + Starbucks
+  /// under Drinks when the sign matches drinks).
   List<_Item> _matchItems(String text) {
     final words = _tokenize(text);
-    return _items.where((item) {
-      if (item.isChecked) return false;
-      return _itemMatchesText(item, words);
-    }).toList();
+    final unchecked = _items.where((item) => !item.isChecked).toList();
+    final byId = <String, _Item>{};
+    final categoriesHit = <String>{};
+
+    for (final item in unchecked) {
+      if (_itemMatchesText(item, words)) {
+        byId[item.id] = item;
+        final key = _categoryGroupKey(item.category);
+        if (key.isNotEmpty) categoriesHit.add(key);
+      }
+    }
+    for (final item in unchecked) {
+      final key = _categoryGroupKey(item.category);
+      if (key.isNotEmpty && categoriesHit.contains(key)) {
+        byId[item.id] = item;
+      }
+    }
+
+    final out = byId.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+    return out;
   }
 
   _Item? get _currentShelfTarget {
@@ -794,10 +837,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       item.aisle ??= _currentAisle;
     }
 
-    final aisleEn = _aisleMatches.isEmpty
-        ? _noListMatchesInAisleMessage(text)
-        : _aisleWalkInLine(_aisleMatches);
-    final aisleUser = aisleEn;
+    final aisleUser = _aisleScanFeedback(
+      rawAisleText: text,
+      matches: _aisleMatches,
+    );
     setState(() {
       _phase = _Phase.aisleResults;
       _aisleStatusMessage = aisleUser;
@@ -918,17 +961,20 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       question =
         'Do NOT read any text, labels, or signs. Use only visual appearance. '
         'Check if any visible product visually matches "${target.name}" (include the exact type or flavor if that matters, not only the brand). '
-        'If it matches, give one short sentence with the full product name including flavor or variant if visible, and its approximate position using phrases like top shelf on the left or middle shelf on the right. '
+        'If it matches, list every distinct flavor or variant you can see that fits this product, one product per line. '
+        'Each line must be: full product name including flavor or variant, then a dash or comma, then that item’s shelf position (phrases like top shelf on the left or middle shelf on the right). '
+        'Put one line break after each product. '
         'End with: ITEM FOUND. '
         'If nothing matches, say: MOVE ALONG, NO ITEMS FOUND. '
-        'Be concise.';
+        'Be concise but do not skip extra flavors.';
     } else {
       question =
         'Do NOT read any text, labels, or signs. Use only visual appearance. '
         'List EVERY distinct branded product or package you can clearly see in this image, across the whole frame: left to right and top to bottom, including smaller or partly hidden items when you can tell what they are. '
         'Do not stop after one or two big items—keep going until each clearly separate product has its own line. '
-        'Each flavor or variety of the same brand counts as a separate product with its own line. '
+        'Each flavor or variety of the same brand counts as a separate product with its own line—never combine flavors. '
         'Each line must be: full product name with flavor if visible, then a dash or comma, then that item’s shelf position (phrases like top shelf on the left or middle shelf on the right). '
+        'Every line must include where that specific product sits on the shelf. '
         'Example format (style only):\n'
         'Cheerios Honey Nut — middle shelf on the right\n'
         'Cheerios Original — top shelf on the left\n'
@@ -1231,11 +1277,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       return;
     }
 
-    final aisleWords = _tokenize(value);
-    final matches = _items.where((item) {
-      if (item.isChecked) return false;
-      return _itemMatchesText(item, aisleWords);
-    }).toList();
+    final matches = _matchItems(value);
 
     if (matches.isEmpty) {
       if (!mounted) return;
@@ -1252,8 +1294,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       return;
     }
 
-    final walkIn = _aisleWalkInLine(matches);
-    final walkInUser = walkIn;
+    final walkInUser = _aisleScanFeedback(
+      rawAisleText: value,
+      matches: matches,
+    );
     setState(() {
       _currentAisleLabel = value;
       _phase = _Phase.aisleResults;
@@ -1324,9 +1368,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                           'FOR STORE EMPLOYEE\n\n'
                           'Please look at this screen. The shopper needs the '
                           'aisle location.\n\n'
+                          'Wait for the beep before speaking. Spell the aisle '
+                          'letter by letter if you use the microphone (for example '
+                          'T, E, A for tea).\n\n'
                           'Type the aisle name below, or tap the microphone and '
-                          'clearly say the aisle name you are in (for example: '
-                          '"Bakery" or "Dairy"). That name will be set in the app.',
+                          'say the aisle you are in (for example: "Bakery" or '
+                          '"Dairy"). That name will be set in the app.',
                           style: TextStyle(
                             fontSize: 22,
                             height: 1.35,
@@ -1384,11 +1431,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                                 listening = true;
                                 transcript = '';
                               });
-                              await _speak(
-                                employeeMode
-                                    ? 'Employee, please say the aisle name now.'
-                                    : 'Say the aisle name now.',
-                              );
+                              if (employeeMode) {
+                                await _employeeAssistanceSpeakCue();
+                              } else {
+                                await _speak('Say the aisle name now.');
+                              }
                               final heard = await _listenForSpokenAislePhrase(
                                 onPartial: (w) {
                                   if (ctx.mounted) {
@@ -1507,6 +1554,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   }
 
   void _openEmployeeAisleHelp() {
+    unawaited(_employeeAssistanceSpeakCue());
     _showSpokenAisleSheet(employeeMode: true);
   }
 
@@ -1750,6 +1798,19 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   Future<void> _speak(String english) async {
     final text = english;
     await _announceTts(text);
+  }
+
+  /// Store employee flow: TTS prompt, system beep, then spelling instructions.
+  Future<void> _employeeAssistanceSpeakCue() async {
+    await _tts.stop();
+    await _speak('Wait until the beep to speak.');
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    SystemSound.play(SystemSoundType.alert);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await _speak(
+      'Employee, please say the aisle name and spell it letter by letter for clarity. '
+      'For example, for the word tea, say: T, E, A.',
+    );
   }
 
   /// Colorful “Menu” control with explicit size so AppBar actions lay out on web
@@ -2245,6 +2306,49 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         _lastShelfTargetName != null && !_lastShelfTargetFound;
     final preview = _scanPreviewBytes;
     final shelfStatusEmpty = _shelfStatusMessage.isEmpty;
+
+    Widget shelfActionRow() {
+      return Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: 56,
+              child: ElevatedButton(
+                onPressed: _onGoToShelf,
+                style: ElevatedButton.styleFrom(
+                  textStyle: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                child: Text(
+                  shouldShowMoveAlongRescan
+                      ? 'Move Along Aisle & Re-Scan'
+                      : 'Scan Shelf',
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SizedBox(
+              height: 56,
+              child: OutlinedButton(
+                onPressed: _onNextAisle,
+                style: OutlinedButton.styleFrom(
+                  textStyle: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                child: const Text('Next Aisle'),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2269,6 +2373,16 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (shouldShowMoveAlongRescan) ...[
+                  shelfActionRow(),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Take a few steps along this aisle and scan the shelf again.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 22, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 20),
+                ],
                 Semantics(
                   liveRegion: true,
                   label: shelfStatusEmpty
@@ -2292,53 +2406,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                           ),
                         ),
                 ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: _onGoToShelf,
-                          style: ElevatedButton.styleFrom(
-                            textStyle: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          child: Text(
-                            shouldShowMoveAlongRescan
-                                ? 'Move Along Aisle & Re-Scan'
-                                : 'Scan Shelf',
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: SizedBox(
-                        height: 56,
-                        child: OutlinedButton(
-                          onPressed: _onNextAisle,
-                          style: OutlinedButton.styleFrom(
-                            textStyle: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          child: const Text('Next Aisle'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (shouldShowMoveAlongRescan) ...[
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Take a few steps along this aisle and scan the shelf again.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 22, color: Colors.white70),
-                  ),
+                if (!shouldShowMoveAlongRescan) ...[
+                  const SizedBox(height: 24),
+                  shelfActionRow(),
                 ],
               ],
             ),
