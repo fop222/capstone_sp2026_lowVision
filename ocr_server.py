@@ -1,4 +1,14 @@
+"""
+OCR HTTP service for the Flutter app.
+
+If you see: RuntimeError: NCCL Error 1 ... from easyocr/torch, the EasyOCR reader
+is using CUDA in a way that triggers multi-GPU / NCCL (common in broken or
+restricted GPU environments). Fix: run with CPU only — leave OCR_USE_GPU unset
+or set OCR_USE_GPU=0. For GPU on a single card, try CUDA_VISIBLE_DEVICES=0 and
+still prefer CPU if NCCL errors persist.
+"""
 import io
+import os
 from typing import List
 
 import easyocr
@@ -18,8 +28,14 @@ def cors_headers(response):
     return response
 
 
-# Load EasyOCR reader once at startup.
-reader = easyocr.Reader(["en"], gpu=False)
+# Load EasyOCR reader once at startup. Default CPU avoids NCCL/CUDA issues on
+# many servers (see module docstring). Set OCR_USE_GPU=1 only if GPU works.
+_use_gpu = os.environ.get("OCR_USE_GPU", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+reader = easyocr.Reader(["en"], gpu=_use_gpu)
 
 
 @app.route("/extract-text", methods=["OPTIONS"])

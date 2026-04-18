@@ -2005,7 +2005,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     await _saveAllProgress();
     if (!mounted) return;
     setState(() => _loading = false);
-    Navigator.of(context).pop(true);
+    navigateToGroceryListHome(context);
   }
 
   Future<void> _announceTts(String text) async {

@@ -126,40 +126,24 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
         centerTitle: true,
         title: FittedBox(
           fit: BoxFit.scaleDown,
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: 'Lumio',
-                  style: GoogleFonts.playfairDisplay(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 3,
-                    color: Colors.white,
-                    height: 1.1,
-                    shadows: [
-                      Shadow(
-                        offset: const Offset(0, 2),
-                        blurRadius: 18,
-                        color: kBrandPurpleMid.withValues(alpha: 0.75),
-                      ),
-                    ],
-                  ),
-                ),
-                TextSpan(
-                  text: ': Low Vision Daily Companion',
-                  style: GoogleFonts.sora(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
-                    color: Colors.white,
-                    height: 1.1,
-                  ),
+          child: Text(
+            'Lumio: Low Vision Daily Companion',
+            maxLines: 1,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.playfairDisplay(
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.2,
+              color: Colors.white,
+              height: 1.1,
+              shadows: [
+                Shadow(
+                  offset: const Offset(0, 2),
+                  blurRadius: 18,
+                  color: kBrandPurpleMid.withValues(alpha: 0.75),
                 ),
               ],
             ),
-            maxLines: 1,
-            textAlign: TextAlign.center,
           ),
         ),
       ),

@@ -23,6 +23,17 @@ Future<void> main() async {
 
 SupabaseClient get supabase => Supabase.instance.client;
 
+/// After shopping ends (e.g. "Congrats, you are done shopping!"), go to the
+/// grocery lists home with a fresh screen so list progress reloads from the server.
+void navigateToGroceryListHome(BuildContext context) {
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute<void>(
+      builder: (_) => const GroceryListScreen(),
+    ),
+    (route) => false,
+  );
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
