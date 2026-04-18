@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'grocery_list_screen.dart';
@@ -21,6 +22,7 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
 
   bool _isSignup = true;
   bool _loading = false;
+  bool _obscurePassword = true;
   String? _errorMessage;
 
   @override
@@ -121,7 +123,45 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isSignup ? 'Welcome' : 'Welcome Back'),
+        centerTitle: true,
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: 'Lumio',
+                  style: GoogleFonts.playfairDisplay(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 3,
+                    color: Colors.white,
+                    height: 1.1,
+                    shadows: [
+                      Shadow(
+                        offset: const Offset(0, 2),
+                        blurRadius: 18,
+                        color: kBrandPurpleMid.withValues(alpha: 0.75),
+                      ),
+                    ],
+                  ),
+                ),
+                TextSpan(
+                  text: ': Low Vision Daily Companion',
+                  style: GoogleFonts.sora(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                    color: Colors.white,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: 1,
+            textAlign: TextAlign.center,
+          ),
+        ),
       ),
       body: GroceryAmbientBackdrop(
         child: SafeArea(
@@ -140,7 +180,7 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Semantics(
-                        label: 'Low Vision Daily Companion',
+                        label: 'Lumio: Low Vision Daily Companion',
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(28),
@@ -218,12 +258,25 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
                       const SizedBox(height: 18),
                       TextFormField(
                         controller: _passwordController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Password',
-                          prefixIcon: Icon(Icons.lock_outline),
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          suffixIcon: IconButton(
+                            tooltip: _obscurePassword
+                                ? 'Show password'
+                                : 'Hide password',
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
                         ),
                         style: theme.textTheme.bodyLarge,
-                        obscureText: true,
+                        obscureText: _obscurePassword,
                         validator: (value) {
                           if (value == null || value.length < 6) {
                             return 'Password must be at least 6 characters';

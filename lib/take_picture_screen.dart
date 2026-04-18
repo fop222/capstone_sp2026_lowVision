@@ -12,8 +12,16 @@ import 'save_image_stub.dart' if (dart.library.html) 'save_image_web.dart';
 
 late List<CameraDescription> cameras;
 
+/// Rear-facing cameras only (no front / selfie camera in the app).
+List<CameraDescription> backCamerasOnly(List<CameraDescription> all) {
+  return all
+      .where((c) => c.lensDirection == CameraLensDirection.back)
+      .toList();
+}
+
 Future<void> initCameras() async {
-  cameras = await availableCameras();
+  final all = await availableCameras();
+  cameras = backCamerasOnly(all);
 }
 
 /// Single camera screen for both web and mobile: live camera preview + capture button.
@@ -42,7 +50,7 @@ class _TakePictureScreenState extends State<TakePictureScreen> {
       return;
     }
     _controller = CameraController(
-      cameras.first,
+      cameras.first, // back camera after [initCameras] filters
       ResolutionPreset.high,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );

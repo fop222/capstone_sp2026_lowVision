@@ -62,8 +62,6 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   bool _cameraReady = false;
   bool _takingPicture = false;
   String? _cameraError;
-  int _cameraIndex = 0;
-
   final FlutterTts _tts = FlutterTts();
   final SpeechToText _speech = SpeechToText();
   bool _audioEnabled = true;
@@ -135,7 +133,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
       return;
     }
     final ctrl = CameraController(
-      cameras[_cameraIndex],
+      cameras.first,
       ResolutionPreset.medium,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
@@ -169,12 +167,6 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   Future<void> _clearFrozenAndRestartCamera() async {
     if (!mounted) return;
     setState(() => _frozenScanBytes = null);
-    await _restartCamera();
-  }
-
-  Future<void> _flipCamera() async {
-    if (cameras.length < 2) return;
-    _cameraIndex = (_cameraIndex + 1) % cameras.length;
     await _restartCamera();
   }
 
@@ -1227,25 +1219,6 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
                           : 'Point at the shelf\nthen tap the button below',
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: Colors.white, fontSize: 22),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 70,
-                  right: 12,
-                  child: Material(
-                    color: Colors.black54,
-                    shape: const CircleBorder(),
-                    clipBehavior: Clip.antiAlias,
-                    child: Tooltip(
-                      message: 'Switch camera',
-                      child: IconButton(
-                        iconSize: 32,
-                        padding: const EdgeInsets.all(12),
-                        onPressed: _flipCamera,
-                        icon: const Icon(Icons.cameraswitch,
-                            color: Colors.white, size: 32),
-                      ),
                     ),
                   ),
                 ),

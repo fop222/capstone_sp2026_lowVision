@@ -174,6 +174,13 @@ const _prefsVlmMenuOrder = 'vlm_shopping_menu_order_v1';
 const _kUnreadableAisleMessage =
     'I could not read the aisle sign. Please retake the photo. If needed, tap Get Help from store employee.';
 
+/// Shown in shelf-scan VLM prompts so cans, bottles, and boxes report visible size with brand/flavor.
+const _kShelfPackagedSizeGuidance =
+    'For canned goods, bottled drinks, or boxed items, when fluid ounces or net weight (oz, fl oz) are clearly visible on the package, include them on that line with brand and flavor or variety. '
+    'Do not invent sizes—only state amounts you can clearly distinguish. '
+    'When two lines differ by size, include the ounces on each line so they stay distinct. '
+    'When every line would repeat the same visible size, do not repeat the identical ounces on every line; mention it once or omit redundant repeats.';
+
 class AisleScannerVlmScreen extends StatefulWidget {
   final String listId;
   final String listTitle;
@@ -197,7 +204,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   bool _cameraReady = false;
   bool _takingPicture = false;
   String? _cameraError;
-  int _cameraIndex = 0;
 
   final FlutterTts _tts = FlutterTts();
   final ImagePicker _picker = ImagePicker();
@@ -415,7 +421,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     }
 
     final ctrl = CameraController(
-      widget.cameras[_cameraIndex],
+      widget.cameras.first,
       ResolutionPreset.medium,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
@@ -452,12 +458,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   Future<void> _clearPreviewAndRestartCamera() async {
     if (!mounted) return;
     setState(() => _scanPreviewBytes = null);
-    await _restartCamera();
-  }
-
-  Future<void> _flipCamera() async {
-    if (widget.cameras.length < 2) return;
-    _cameraIndex = (_cameraIndex + 1) % widget.cameras.length;
     await _restartCamera();
   }
 
@@ -1092,13 +1092,15 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
           'List distinct branded products you can clearly see (each different flavor or variety gets its own line). '
           'If many facings are the same flavor, describe that flavor once with its general shelf area—do not repeat the same flavor for each physical unit. '
           'Each line: product name with flavor if visible, then a dash or comma, then shelf position (e.g. middle shelf on the right). '
-          'Put one line break after each distinct product or flavor.';
+          'Put one line break after each distinct product or flavor. '
+          '$_kShelfPackagedSizeGuidance';
     } else if (singleTarget != null) {
       question =
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
           'Check if any visible product visually matches "${singleTarget.name}" (include the exact type or flavor if that matters, not only the brand). '
           'If it matches, list each distinct flavor or variant of that product you can see—one line per flavor only, not one line per identical can or bottle. '
           'Each line: full product name including flavor, then a dash or comma, then shelf position (phrases like top shelf on the left or middle shelf on the right). '
+          '$_kShelfPackagedSizeGuidance '
           'End with: ITEM FOUND. '
           'If nothing matches, say only: NO ITEMS FOUND. '
           'Do not write MOVE ALONG in your answer.';
@@ -1110,6 +1112,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
           'For each list item you can clearly see, output at most one line per distinct flavor (not one line per identical unit). '
           'Each line: full product name including variant if visible, then a dash or comma, then shelf position '
           '(phrases like top shelf on the left or middle shelf on the right). '
+          '$_kShelfPackagedSizeGuidance '
           'Only include lines for products that match the list items above. '
           'If you can see at least one of these list items, end with: ITEM FOUND. '
           'If none of these list items are visible, say only: NO ITEMS FOUND. '
@@ -1209,7 +1212,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       if (wantCheck == true) {
         setState(() => item.isChecked = true);
         await _saveItemCheckedState(item);
-        await _speak('${item.name} checked off.');
+        final ended = await _speakAfterScanCheckOffWithOptionalFinish(item);
+        if (ended) return;
       } else if (wantCheck == false) {
         await _speak('Okay. ${item.name} is still on your list.');
       }
@@ -1360,12 +1364,53 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     );
   }
 
+  /// e.g. "5 items done, 2 more to go." — after an item is checked, using current list state.
+  String _listProgressTtsSentence() {
+    final total = _items.length;
+    if (total == 0) return '';
+    final done = _items.where((i) => i.isChecked).length;
+    final remaining = total - done;
+    final donePart = done == 1 ? '1 item done' : '$done items done';
+    if (remaining <= 0) return '$donePart.';
+    final remPart = remaining == 1 ? '1 more to go' : '$remaining more to go';
+    return '$donePart, $remPart.';
+  }
+
+  /// After checking off from a shelf scan (Yes): progress TTS, then optionally congrats + exit if the list is complete.
+  /// Returns true if [Navigator.pop] was invoked via [_onEndShopping].
+  Future<bool> _speakAfterScanCheckOffWithOptionalFinish(_Item item) async {
+    final progress = _listProgressTtsSentence();
+    if (progress.isEmpty) {
+      await _speak('${item.name} checked off.');
+      return false;
+    }
+    await _speak('${item.name} checked off. $progress');
+    final allDone = _items.isNotEmpty && _items.every((i) => i.isChecked);
+    if (!allDone) return false;
+    await _speak('Congrats, you are done shopping!');
+    if (!mounted) return true;
+    await _onEndShopping();
+    return true;
+  }
+
+  /// When the last item is checked from the list UI (not shelf Yes), still exit shopping with congrats.
+  Future<void> _maybeFinishShoppingAfterManualCheckOff(_Item item) async {
+    final allDone = _items.isNotEmpty && _items.every((i) => i.isChecked);
+    if (!allDone) return;
+    await _speak('Congrats, you are done shopping!');
+    if (!mounted) return;
+    await _onEndShopping();
+  }
+
   Future<void> _toggleItem(_Item item) async {
     setState(() => item.isChecked = !item.isChecked);
     await _saveItemCheckedState(item);
-    await _speak(
-      item.isChecked ? '${item.name} checked off.' : '${item.name} unchecked.',
-    );
+    if (!item.isChecked) {
+      await _speak('${item.name} unchecked.');
+      return;
+    }
+    await _speak('${item.name} checked off.');
+    await _maybeFinishShoppingAfterManualCheckOff(item);
   }
 
   Future<void> _reloadItemsFromServer() async {
@@ -2308,20 +2353,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                                       ),
                                     ],
                                   ),
-                  ),
-                ),
-                Positioned(
-                  top: 75,
-                  right: 12,
-                  child: Material(
-                    color: Colors.black54,
-                    shape: const CircleBorder(),
-                    child: IconButton(
-                      iconSize: 32,
-                      onPressed: _flipCamera,
-                      icon: const Icon(Icons.cameraswitch,
-                          color: Colors.white, size: 32),
-                    ),
                   ),
                 ),
               ],
