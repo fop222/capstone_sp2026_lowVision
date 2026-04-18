@@ -155,6 +155,151 @@ String _englishNameList(List<String> names) {
   return '${n.sublist(0, n.length - 1).join(', ')}, and ${n.last}';
 }
 
+/// Parsed block from VLM shelf output (Item / Location / optional fields).
+class _ShelfProductBlock {
+  const _ShelfProductBlock({
+    required this.item,
+    required this.location,
+    this.flavor,
+    this.size,
+    this.description,
+  });
+
+  final String item;
+  final String location;
+  final String? flavor;
+  final String? size;
+  final String? description;
+
+  String get _dedupeKey =>
+      '${item.toLowerCase()}|${flavor?.toLowerCase() ?? ''}|${size?.toLowerCase() ?? ''}';
+
+  _ShelfProductBlock mergeLocation(String other) {
+    final a = location.trim();
+    final b = other.trim();
+    if (b.isEmpty) return this;
+    if (a.isEmpty) {
+      return _ShelfProductBlock(
+        item: item,
+        location: b,
+        flavor: flavor,
+        size: size,
+        description: description,
+      );
+    }
+    if (a.toLowerCase() == b.toLowerCase()) return this;
+    return _ShelfProductBlock(
+      item: item,
+      location: '$a; $b',
+      flavor: flavor,
+      size: size,
+      description: description,
+    );
+  }
+
+  String toDisplayString() {
+    final loc = _humanizeShelfLocationPhrases(location);
+    final buf = StringBuffer()
+      ..writeln('Item: $item')
+      ..writeln('Location: $loc');
+    final f = flavor?.trim();
+    if (f != null && f.isNotEmpty) buf.writeln('Flavor: $f');
+    final s = size?.trim();
+    if (s != null && s.isNotEmpty) buf.writeln('Size: $s');
+    final d = description?.trim();
+    if (d != null && d.isNotEmpty) buf.writeln('Description: $d');
+    return buf.toString().trimRight();
+  }
+}
+
+bool _looksLikeStructuredShelfOutput(String s) {
+  return RegExp(r'^\s*Item\s*:', caseSensitive: false, multiLine: true)
+      .hasMatch(s.trim());
+}
+
+List<String> _splitShelfTextIntoItemBlocks(String input) {
+  final t = input.trim();
+  if (t.isEmpty) return [];
+  final re = RegExp(r'^Item\s*:', caseSensitive: false, multiLine: true);
+  if (!re.hasMatch(t)) return [t];
+  final matches = re.allMatches(t).toList();
+  final out = <String>[];
+  for (var i = 0; i < matches.length; i++) {
+    final start = matches[i].start;
+    final end = i + 1 < matches.length ? matches[i + 1].start : t.length;
+    out.add(t.substring(start, end).trim());
+  }
+  return out.where((s) => s.isNotEmpty).toList();
+}
+
+final _kShelfFieldLine = RegExp(
+  r'^(Item|Location|Flavor|Flavour|Size|Description)\s*:\s*(.*)$',
+  caseSensitive: false,
+);
+
+_ShelfProductBlock? _parseShelfProductBlock(String block) {
+  String? item, location, flavor, size, description;
+  for (final raw in block.split(RegExp(r'\r?\n'))) {
+    final line = raw.trim();
+    if (line.isEmpty) continue;
+    final m = _kShelfFieldLine.firstMatch(line);
+    if (m == null) continue;
+    final key = m.group(1)!.toLowerCase();
+    final val = (m.group(2) ?? '').trim();
+    switch (key) {
+      case 'item':
+        item = val;
+        break;
+      case 'location':
+        location = val;
+        break;
+      case 'flavor':
+      case 'flavour':
+        flavor = val;
+        break;
+      case 'size':
+        size = val;
+        break;
+      case 'description':
+        description = val;
+        break;
+    }
+  }
+  final it = item?.trim() ?? '';
+  if (it.isEmpty) return null;
+  var loc = location?.trim() ?? '';
+  if (loc.isEmpty) loc = 'not specified';
+
+  String? opt(String? s) {
+    final t = s?.trim();
+    if (t == null || t.isEmpty) return null;
+    return t;
+  }
+
+  return _ShelfProductBlock(
+    item: it,
+    location: loc,
+    flavor: opt(flavor),
+    size: opt(size),
+    description: opt(description),
+  );
+}
+
+/// Merge duplicate products and normalize labeled shelf blocks for UI/TTS.
+String _dedupeStructuredShelfBlocks(String input) {
+  final blocks = _splitShelfTextIntoItemBlocks(input);
+  final merged = <String, _ShelfProductBlock>{};
+  for (final raw in blocks) {
+    final p = _parseShelfProductBlock(raw);
+    if (p == null) continue;
+    final k = p._dedupeKey;
+    final existing = merged[k];
+    merged[k] = existing == null ? p : existing.mergeLocation(p.location);
+  }
+  if (merged.isEmpty) return input.trim();
+  return merged.values.map((b) => b.toDisplayString()).join('\n\n');
+}
+
 enum _Phase { aisleSign, aisleResults, shelf, shelfResults }
 
 const _kMenuEnd = 'end';
@@ -174,12 +319,15 @@ const _prefsVlmMenuOrder = 'vlm_shopping_menu_order_v1';
 const _kUnreadableAisleMessage =
     'I could not read the aisle sign. Please retake the photo. If needed, tap Get Help from store employee.';
 
-/// Shown in shelf-scan VLM prompts so cans, bottles, and boxes report visible size with brand/flavor.
-const _kShelfPackagedSizeGuidance =
-    'For canned goods, bottled drinks, or boxed items, when fluid ounces or net weight (oz, fl oz) are clearly visible on the package, include them on that line with brand and flavor or variety. '
-    'Do not invent sizes—only state amounts you can clearly distinguish. '
-    'When two lines differ by size, include the ounces on each line so they stay distinct. '
-    'When every line would repeat the same visible size, do not repeat the identical ounces on every line; mention it once or omit redundant repeats.';
+/// Shelf-scan VLM: fixed labels per product; omit optional lines when unknown.
+const _kShelfStructuredFormat =
+    'For each distinct product, write one block using exactly these line labels (each on its own line, in this order). '
+    'Item: <brand and product name> '
+    'Location: <shelf position, e.g. middle shelf on the right> '
+    'Flavor: <only if a flavor or variety is clearly visible—omit the entire Flavor line if there is none> '
+    'Size: <fluid ounces or net weight only if clearly visible on cans, bottles, or boxes—omit the entire Size line if none; do not guess> '
+    'Description: <any other helpful visible detail—omit the entire Description line if nothing extra> '
+    'Put one blank line between product blocks. Do not put product and shelf position on a single line with only a dash; use the Location line instead.';
 
 class AisleScannerVlmScreen extends StatefulWidget {
   final String listId;
@@ -668,6 +816,13 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     return null;
   }
 
+  String _finalizeShelfDisplayText(String cleaned) {
+    if (_looksLikeStructuredShelfOutput(cleaned)) {
+      return _dedupeStructuredShelfBlocks(cleaned);
+    }
+    return _dedupeShelfLinesByProduct(cleaned);
+  }
+
   String _shelfDisplayFromVlmAnswer(String vlmAnswer) {
     final cleanedRaw = _vlmAnswerWithoutFoundTags(vlmAnswer);
     final cleaned = _normalizeNoneItemCaption(
@@ -675,7 +830,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         _humanizeShelfLocationPhrases(cleanedRaw),
       ),
     );
-    return _dedupeShelfLinesByProduct(cleaned);
+    return _finalizeShelfDisplayText(cleaned);
   }
 
   String _buildShelfStatusMessage({
@@ -685,7 +840,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     required bool targetFound,
   }) {
     final cleanedRaw = _vlmAnswerWithoutFoundTags(vlmAnswer);
-    final cleaned = _dedupeShelfLinesByProduct(
+    final cleaned = _finalizeShelfDisplayText(
       _normalizeNoneItemCaption(
         _expandShelfLinesForScreenReader(
           _humanizeShelfLocationPhrases(cleanedRaw),
@@ -1089,18 +1244,15 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (targets.isEmpty) {
       question =
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
-          'List distinct branded products you can clearly see (each different flavor or variety gets its own line). '
-          'If many facings are the same flavor, describe that flavor once with its general shelf area—do not repeat the same flavor for each physical unit. '
-          'Each line: product name with flavor if visible, then a dash or comma, then shelf position (e.g. middle shelf on the right). '
-          'Put one line break after each distinct product or flavor. '
-          '$_kShelfPackagedSizeGuidance';
+          'List each distinct branded product you can clearly see (each different flavor or variety is its own block). '
+          '$_kShelfStructuredFormat '
+          'If many facings are the same flavor, describe it once—do not repeat the same flavor for each physical unit.';
     } else if (singleTarget != null) {
       question =
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
           'Check if any visible product visually matches "${singleTarget.name}" (include the exact type or flavor if that matters, not only the brand). '
-          'If it matches, list each distinct flavor or variant of that product you can see—one line per flavor only, not one line per identical can or bottle. '
-          'Each line: full product name including flavor, then a dash or comma, then shelf position (phrases like top shelf on the left or middle shelf on the right). '
-          '$_kShelfPackagedSizeGuidance '
+          'If it matches, list each distinct flavor or variant you can see—one block per flavor, not one block per identical can or bottle. '
+          '$_kShelfStructuredFormat '
           'End with: ITEM FOUND. '
           'If nothing matches, say only: NO ITEMS FOUND. '
           'Do not write MOVE ALONG in your answer.';
@@ -1109,11 +1261,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       question =
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
           'The shopper is looking for ALL of these list items on this shelf at the same time: $quoted. '
-          'For each list item you can clearly see, output at most one line per distinct flavor (not one line per identical unit). '
-          'Each line: full product name including variant if visible, then a dash or comma, then shelf position '
-          '(phrases like top shelf on the left or middle shelf on the right). '
-          '$_kShelfPackagedSizeGuidance '
-          'Only include lines for products that match the list items above. '
+          'For each list item you can clearly see, output at most one block per distinct flavor (not one block per identical unit). '
+          '$_kShelfStructuredFormat '
+          'Only include blocks for products that match the list items above. '
           'If you can see at least one of these list items, end with: ITEM FOUND. '
           'If none of these list items are visible, say only: NO ITEMS FOUND. '
           'Do not write MOVE ALONG in your answer.';
@@ -1387,7 +1537,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     await _speak('${item.name} checked off. $progress');
     final allDone = _items.isNotEmpty && _items.every((i) => i.isChecked);
     if (!allDone) return false;
-    await _speak('Congrats, you are done shopping!');
+    await _speak('Congrats, you are done grocery shopping!');
     if (!mounted) return true;
     await _onEndShopping();
     return true;
