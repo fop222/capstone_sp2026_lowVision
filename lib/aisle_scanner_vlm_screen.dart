@@ -155,21 +155,19 @@ String _englishNameList(List<String> names) {
   return '${n.sublist(0, n.length - 1).join(', ')}, and ${n.last}';
 }
 
-/// Parsed block from VLM shelf output (Item / Location / optional fields).
+/// Parsed block from VLM shelf output (Item / Location / optional Flavor & Size only).
 class _ShelfProductBlock {
   const _ShelfProductBlock({
     required this.item,
     required this.location,
     this.flavor,
     this.size,
-    this.description,
   });
 
   final String item;
   final String location;
   final String? flavor;
   final String? size;
-  final String? description;
 
   String get _dedupeKey =>
       '${item.toLowerCase()}|${flavor?.toLowerCase() ?? ''}|${size?.toLowerCase() ?? ''}';
@@ -184,7 +182,6 @@ class _ShelfProductBlock {
         location: b,
         flavor: flavor,
         size: size,
-        description: description,
       );
     }
     if (a.toLowerCase() == b.toLowerCase()) return this;
@@ -193,7 +190,6 @@ class _ShelfProductBlock {
       location: '$a; $b',
       flavor: flavor,
       size: size,
-      description: description,
     );
   }
 
@@ -206,8 +202,6 @@ class _ShelfProductBlock {
     if (f != null && f.isNotEmpty) buf.writeln('Flavor: $f');
     final s = size?.trim();
     if (s != null && s.isNotEmpty) buf.writeln('Size: $s');
-    final d = description?.trim();
-    if (d != null && d.isNotEmpty) buf.writeln('Description: $d');
     return buf.toString().trimRight();
   }
 }
@@ -233,12 +227,28 @@ List<String> _splitShelfTextIntoItemBlocks(String input) {
 }
 
 final _kShelfFieldLine = RegExp(
-  r'^(Item|Location|Flavor|Flavour|Size|Description)\s*:\s*(.*)$',
+  r'^(Item|Location|Flavor|Flavour|Size)\s*:\s*(.*)$',
   caseSensitive: false,
 );
 
+/// Drops Description / Price lines from model output (we do not show them in UI or TTS).
+String _stripDescriptionPriceLinesFromShelfText(String s) {
+  if (s.isEmpty) return s;
+  return s
+      .split(RegExp(r'\r?\n'))
+      .where((line) {
+        final low = line.trim().toLowerCase();
+        if (low.startsWith('description:')) return false;
+        if (low.startsWith('price:')) return false;
+        if (low.startsWith('cost:')) return false;
+        if (low.startsWith('$/')) return false;
+        return true;
+      })
+      .join('\n');
+}
+
 _ShelfProductBlock? _parseShelfProductBlock(String block) {
-  String? item, location, flavor, size, description;
+  String? item, location, flavor, size;
   for (final raw in block.split(RegExp(r'\r?\n'))) {
     final line = raw.trim();
     if (line.isEmpty) continue;
@@ -260,9 +270,6 @@ _ShelfProductBlock? _parseShelfProductBlock(String block) {
       case 'size':
         size = val;
         break;
-      case 'description':
-        description = val;
-        break;
     }
   }
   final it = item?.trim() ?? '';
@@ -281,7 +288,6 @@ _ShelfProductBlock? _parseShelfProductBlock(String block) {
     location: loc,
     flavor: opt(flavor),
     size: opt(size),
-    description: opt(description),
   );
 }
 
@@ -326,7 +332,7 @@ const _kShelfStructuredFormat =
     'Location: <shelf position, e.g. middle shelf on the right> '
     'Flavor: <only if a flavor or variety is clearly visible—omit the entire Flavor line if there is none> '
     'Size: <fluid ounces or net weight only if clearly visible on cans, bottles, or boxes—omit the entire Size line if none; do not guess> '
-    'Description: <any other helpful visible detail—omit the entire Description line if nothing extra> '
+    'Do not add a Description line. Do not mention price, cost, dollars, or cents. '
     'Put one blank line between product blocks. Do not put product and shelf position on a single line with only a dash; use the Location line instead.';
 
 class AisleScannerVlmScreen extends StatefulWidget {
@@ -817,10 +823,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   }
 
   String _finalizeShelfDisplayText(String cleaned) {
-    if (_looksLikeStructuredShelfOutput(cleaned)) {
-      return _dedupeStructuredShelfBlocks(cleaned);
+    final stripped = _stripDescriptionPriceLinesFromShelfText(cleaned);
+    if (_looksLikeStructuredShelfOutput(stripped)) {
+      return _dedupeStructuredShelfBlocks(stripped);
     }
-    return _dedupeShelfLinesByProduct(cleaned);
+    return _dedupeShelfLinesByProduct(stripped);
   }
 
   String _shelfDisplayFromVlmAnswer(String vlmAnswer) {
@@ -2685,6 +2692,146 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     );
   }
 
+  /// Distinct bordered “textbox” for one shelf field label + value.
+  Widget _shelfFieldBox(String label, String value) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E2C),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white30, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.white60,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _shelfProductCard(_ShelfProductBlock b) {
+    final loc = _humanizeShelfLocationPhrases(b.location);
+    final pieces = <Widget>[
+      _shelfFieldBox('Item', b.item),
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10),
+        child: Divider(height: 1, thickness: 1, color: Colors.white24),
+      ),
+      _shelfFieldBox('Location', loc),
+    ];
+    final f = b.flavor?.trim();
+    if (f != null && f.isNotEmpty) {
+      pieces.add(const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10),
+        child: Divider(height: 1, thickness: 1, color: Colors.white24),
+      ));
+      pieces.add(_shelfFieldBox('Flavor', f));
+    }
+    final s = b.size?.trim();
+    if (s != null && s.isNotEmpty) {
+      pieces.add(const Padding(
+        padding: EdgeInsets.symmetric(vertical: 10),
+        child: Divider(height: 1, thickness: 1, color: Colors.white24),
+      ));
+      pieces.add(_shelfFieldBox('Size', s));
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151822),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFF6D5EF5).withValues(alpha: 0.5),
+          width: 2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: pieces,
+      ),
+    );
+  }
+
+  /// Structured shelf copy gets separate field boxes; other messages stay plain [Text].
+  Widget _shelfStatusRichBody(String message) {
+    final t = message.trim();
+    const prefix = 'On this shelf:';
+    String? header;
+    var body = t;
+    if (t.length >= prefix.length &&
+        t.substring(0, prefix.length).toLowerCase() == prefix.toLowerCase()) {
+      header = 'On this shelf';
+      body = t.substring(prefix.length).trimLeft();
+      if (body.startsWith('\n')) body = body.substring(1).trim();
+    }
+    if (!_looksLikeStructuredShelfOutput(body)) {
+      return Text(
+        message,
+        style: const TextStyle(
+          fontSize: 26,
+          fontWeight: FontWeight.w700,
+          height: 1.3,
+        ),
+      );
+    }
+    final blocks = _splitShelfTextIntoItemBlocks(body);
+    final parsed = <_ShelfProductBlock>[];
+    for (final raw in blocks) {
+      final p = _parseShelfProductBlock(raw);
+      if (p != null) parsed.add(p);
+    }
+    if (parsed.isEmpty) {
+      return Text(
+        message,
+        style: const TextStyle(
+          fontSize: 26,
+          fontWeight: FontWeight.w700,
+          height: 1.3,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (header != null) ...[
+          Text(
+            header,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: Colors.white.withValues(alpha: 0.88),
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+        for (var i = 0; i < parsed.length; i++) ...[
+          if (i > 0) const SizedBox(height: 16),
+          _shelfProductCard(parsed[i]),
+        ],
+      ],
+    );
+  }
+
   Widget _buildShelfResults() {
     final shouldShowMoveAlongRescan =
         _lastShelfTargetName != null && !_lastShelfTargetFound;
@@ -2781,14 +2928,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                             height: 1.3,
                           ),
                         )
-                      : Text(
-                          _shelfStatusMessage,
-                          style: const TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w700,
-                            height: 1.3,
-                          ),
-                        ),
+                      : _shelfStatusRichBody(_shelfStatusMessage),
                 ),
                 if (!shouldShowMoveAlongRescan) ...[
                   const SizedBox(height: 24),
