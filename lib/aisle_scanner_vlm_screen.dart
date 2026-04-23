@@ -73,7 +73,7 @@ String _noListMatchesInAisleMessage(String rawAisleText) {
   if (_isOcrNoTextPlaceholder(label)) {
     return 'No text found.';
   }
-  return 'You are in the $label. No items from your list are in this aisle. Keep moving to the next aisle.';
+  return 'No items from your list are in this aisle. Keep moving to the next aisle.';
 }
 
 String _aisleItemsToFindLine(List<_Item> matches) {
@@ -95,12 +95,21 @@ String _aisleScanFeedback({
   required String rawAisleText,
   required List<_Item> matches,
 }) {
-  final label = _readableAisleTitleFromOcr(rawAisleText);
+  final categories = matches
+    .map((e) => e.category)
+    .where((c) => c.isNotEmpty)
+    .toSet()
+    .toList();
+
   if (matches.isEmpty) {
     return _noListMatchesInAisleMessage(rawAisleText);
   }
   final itemsLine = _aisleItemsToFindLine(matches);
-  return 'You are in the $label aisle. '
+  final aisleLabel = categories.isEmpty
+      ? null
+      : _englishNameList(categories);
+
+  return 'You are in the $aisleLabel aisle. '
       '$itemsLine Walk in and tap Scan Shelf when you are ready.';
 }
 
@@ -241,7 +250,7 @@ String _stripDescriptionPriceLinesFromShelfText(String s) {
         if (low.startsWith('description:')) return false;
         if (low.startsWith('price:')) return false;
         if (low.startsWith('cost:')) return false;
-        if (low.startsWith('$/')) return false;
+        if (low.startsWith(r'$/')) return false;
         return true;
       })
       .join('\n');
