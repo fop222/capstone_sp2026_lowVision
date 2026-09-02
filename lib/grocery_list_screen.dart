@@ -484,16 +484,23 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Grocery Lists'),
-        leading: Tooltip(
-          message: 'Edit profile',
-          child: IconButton(
-            icon: const Icon(Icons.person_outline, size: 32),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => const ProfileSetupScreen(isEditing: true)),
-            ),
-          ),
-        ),
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                tooltip: 'Back',
+                icon: const Icon(Icons.arrow_back, size: 32),
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : Tooltip(
+                message: 'Edit profile',
+                child: IconButton(
+                  icon: const Icon(Icons.person_outline, size: 32),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            const ProfileSetupScreen(isEditing: true)),
+                  ),
+                ),
+              ),
         actions: [
           Tooltip(
             message: 'Sign out',

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'grocery_list_screen.dart';
+import 'home_landing_screen.dart';
 import 'grocery_ui.dart';
 import 'main.dart';
 import 'profile_setup_screen.dart';
@@ -104,7 +104,7 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
         );
       } else {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const GroceryListScreen()),
+          MaterialPageRoute(builder: (_) => const HomeLandingScreen()),
         );
       }
     } on AuthException catch (e) {

@@ -7,6 +7,7 @@ import 'grocery_ui.dart';
 import 'take_picture_screen.dart';
 import 'supabase_auth_screen.dart';
 import 'grocery_list_screen.dart';
+import 'home_landing_screen.dart';
 import 'profile_setup_screen.dart';
 
 Future<void> main() async {
@@ -29,6 +30,16 @@ void navigateToGroceryListHome(BuildContext context) {
   Navigator.of(context).pushAndRemoveUntil(
     MaterialPageRoute<void>(
       builder: (_) => const GroceryListScreen(),
+    ),
+    (route) => false,
+  );
+}
+
+/// Return to the Shopping / Cooking / Eating landing page.
+void navigateToAppHome(BuildContext context) {
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute<void>(
+      builder: (_) => const HomeLandingScreen(),
     ),
     (route) => false,
   );
@@ -234,7 +245,7 @@ class _ProfileGateState extends State<_ProfileGate> {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) =>
-            hasProfile ? const GroceryListScreen() : const ProfileSetupScreen(),
+            hasProfile ? const HomeLandingScreen() : const ProfileSetupScreen(),
       ),
     );
   }
