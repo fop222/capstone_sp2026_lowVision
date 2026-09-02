@@ -89,7 +89,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: _colorScheme,
         useMaterial3: true,
-        pageTransitionsTheme: const PageTransitionsTheme(
+        pageTransitionsTheme: PageTransitionsTheme(
           builders: {
             TargetPlatform.android: OpenUpwardsPageTransitionsBuilder(),
             TargetPlatform.fuchsia: OpenUpwardsPageTransitionsBuilder(),
