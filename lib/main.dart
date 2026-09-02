@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_colors.dart';
+import 'app_routes.dart';
 import 'grocery_ui.dart';
 import 'take_picture_screen.dart';
 import 'supabase_auth_screen.dart';
@@ -82,6 +83,9 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Low Vision Daily Companion',
       debugShowCheckedModeBanner: false,
+      routes: {
+        AppRoutes.home: (_) => const HomeLandingScreen(),
+      },
       theme: ThemeData(
         colorScheme: _colorScheme,
         useMaterial3: true,

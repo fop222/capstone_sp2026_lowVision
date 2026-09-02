@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'home_landing_screen.dart';
+import 'app_routes.dart';
 import 'grocery_ui.dart';
 import 'main.dart';
 
@@ -144,9 +144,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         );
         Navigator.of(context).pop();
       } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeLandingScreen()),
-        );
+        Navigator.of(context).pushReplacementNamed(AppRoutes.home);
       }
     } catch (e) {
       setState(() => _error = e.toString());
@@ -345,11 +343,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                         child: TextButton(
                           onPressed: _saving
                               ? null
-                              : () => Navigator.of(context).pushReplacement(
-                                    MaterialPageRoute(
-                                      builder: (_) => const HomeLandingScreen(),
-                                    ),
-                                  ),
+                              : () => Navigator.of(context)
+                                  .pushReplacementNamed(AppRoutes.home),
                           style: TextButton.styleFrom(
                             textStyle: theme.textTheme.bodyMedium,
                           ),

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'grocery_list_screen.dart';
 import 'grocery_ui.dart';
-import 'main.dart';
 import 'profile_setup_screen.dart';
 import 'supabase_auth_screen.dart';
 
@@ -12,7 +12,7 @@ class HomeLandingScreen extends StatelessWidget {
   const HomeLandingScreen({super.key});
 
   Future<void> _signOut(BuildContext context) async {
-    await supabase.auth.signOut();
+    await Supabase.instance.client.auth.signOut();
     if (!context.mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const SupabaseAuthScreen()),

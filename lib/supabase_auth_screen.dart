@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'home_landing_screen.dart';
+import 'app_routes.dart';
 import 'grocery_ui.dart';
 import 'main.dart';
 import 'profile_setup_screen.dart';
@@ -103,9 +103,7 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
           MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
         );
       } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeLandingScreen()),
-        );
+        Navigator.of(context).pushReplacementNamed(AppRoutes.home);
       }
     } on AuthException catch (e) {
       setState(() => _errorMessage = e.message);
