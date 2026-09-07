@@ -366,12 +366,19 @@ class AisleScannerVlmScreen extends StatefulWidget {
   final List<Map<String, dynamic>> items;
   final List<CameraDescription> cameras;
 
+  /// When true the screen operates in Pantry / Fridge mode:
+  /// • Starts at the shelf-scan phase (no aisle-sign step)
+  /// • Uses pantry-appropriate titles, instructions, and TTS
+  /// • Normal grocery-store aisle scanning is completely unchanged
+  final bool pantryMode;
+
   const AisleScannerVlmScreen({
     super.key,
     required this.listId,
     required this.listTitle,
     required this.items,
     required this.cameras,
+    this.pantryMode = false,
   });
 
   @override
@@ -445,6 +452,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         await _openAddItemsFromDrawer();
       },
     )..mount();
+    // Pantry mode skips the aisle-sign phase and goes straight to shelf scan.
+    if (widget.pantryMode) {
+      _phase = _Phase.shelf;
+    }
     _tts.awaitSpeakCompletion(true);
     unawaited(_syncTtsLanguage());
     _initSpeech();
@@ -452,7 +463,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     _loadMenuOrder();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _speak(
-        'Grocery shopping mode started for ${widget.listTitle}. Point your camera at the aisle sign and tap Scan Aisle Sign.',
+        widget.pantryMode
+            ? 'Point your camera at the shelves in your pantry or refrigerator. When the items are visible, select Scan Shelves.'
+            : 'Grocery shopping mode started for ${widget.listTitle}. Point your camera at the aisle sign and tap Scan Aisle Sign.',
       );
     });
   }
@@ -2295,7 +2308,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = 'Grocery Aisle $_currentAisleLabel';
+    final title = widget.pantryMode
+        ? 'Scan Pantry / Fridge'
+        : 'Grocery Aisle $_currentAisleLabel';
 
     return PopScope(
       canPop: !_shoppingMenuOpen && !_fullScreenListOpen,
@@ -2498,10 +2513,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                             style: TextStyle(color: Colors.white, fontSize: 22),
                           )
                         : pendingShelf.isEmpty
-                            ? const Text(
-                                'Point at the shelf',
+                            ? Text(
+                                widget.pantryMode
+                                    ? 'Point your camera at the shelves in your pantry or refrigerator.'
+                                    : 'Point at the shelf',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 22,
                                 ),
@@ -2593,7 +2610,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                       onPressed: (_loading || _takingPicture)
                           ? null
                           : (isAisle ? _onScanAisleSign : _onScanShelf),
-                      child: Text(isAisle ? 'Scan Aisle Sign' : 'Scan Shelf'),
+                      child: Text(
+                        widget.pantryMode
+                            ? 'Scan Shelves'
+                            : (isAisle ? 'Scan Aisle Sign' : 'Scan Shelf'),
+                      ),
                     ),
                   ),
                 ],

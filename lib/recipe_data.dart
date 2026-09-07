@@ -1,7 +1,27 @@
 /// Recipe data model and static recipe catalogue.
 ///
-/// Ingredients, tools, and steps are intentionally empty — they will be
-/// provided and populated in a later update. Do not generate content for them.
+/// Ingredients, tools, and steps are intentionally empty for most recipes —
+/// they will be provided and populated in a later update. Do not generate
+/// content for them.
+
+// ─── RecipeIngredient ─────────────────────────────────────────────────────────
+
+/// A single ingredient with an optional preparation quantity.
+///
+/// [quantity] is for display on the recipe detail page only (e.g. "1 cup",
+/// "3", "1/4 teaspoon"). The shopping-list item is always created with
+/// quantity = 1 regardless of this field.
+class RecipeIngredient {
+  final String name;
+
+  /// Human-readable amount (e.g. "1 cup", "2 tablespoons", "to taste").
+  /// Empty string means the quantity has not been specified yet.
+  final String quantity;
+
+  const RecipeIngredient(this.name, {this.quantity = ''});
+}
+
+// ─── Recipe ───────────────────────────────────────────────────────────────────
 
 class Recipe {
   final String id;
@@ -24,8 +44,8 @@ class Recipe {
 
   final List<String> allergens;
 
-  // ── populated later ──────────────────────────────────────────────────────
-  final List<String> ingredients;
+  // ── populated as data becomes available ───────────────────────────────────
+  final List<RecipeIngredient> ingredients;
   final List<String> tools;
   final List<String> steps;
 
@@ -66,11 +86,11 @@ const List<Recipe> kAllRecipes = [
     dietaryPreferences: ['Vegetarian'],
     allergens: ['Dairy'],
     ingredients: [
-      'Yogurt',
-      'Granola',
-      'Strawberries',
-      'Blueberries',
-      'Honey',
+      RecipeIngredient('Yogurt', quantity: '1 cup'),
+      RecipeIngredient('Granola', quantity: '1/2 cup'),
+      RecipeIngredient('Strawberries', quantity: '1/4 cup'),
+      RecipeIngredient('Blueberries', quantity: '1/4 cup'),
+      RecipeIngredient('Honey', quantity: '1 tablespoon'),
     ],
     tools: [
       'Bowl or glass',
@@ -90,14 +110,14 @@ const List<Recipe> kAllRecipes = [
     dietaryPreferences: ['Vegetarian'],
     allergens: ['Wheat / Gluten', 'Dairy', 'Eggs'],
     ingredients: [
-      'All-purpose flour',
-      'Baking powder',
-      'Sugar',
-      'Salt',
-      'Milk',
-      'Egg',
-      'Butter',
-      'Maple syrup',
+      RecipeIngredient('All-purpose flour', quantity: '1 cup'),
+      RecipeIngredient('Baking powder', quantity: '2 teaspoons'),
+      RecipeIngredient('Sugar', quantity: '2 tablespoons'),
+      RecipeIngredient('Salt', quantity: '1/4 teaspoon'),
+      RecipeIngredient('Milk', quantity: '1 cup'),
+      RecipeIngredient('Egg', quantity: '1'),
+      RecipeIngredient('Butter', quantity: '2 tablespoons'),
+      RecipeIngredient('Maple syrup', quantity: 'to taste'),
     ],
     tools: [
       'Large mixing bowl',
@@ -119,11 +139,11 @@ const List<Recipe> kAllRecipes = [
     dietaryPreferences: ['Vegetarian', 'Gluten-Free'],
     allergens: ['Eggs'],
     ingredients: [
-      'Eggs',
-      'Salt',
-      'Pepper',
-      'Milk or water',
-      'Butter or oil',
+      RecipeIngredient('Eggs', quantity: '3'),
+      RecipeIngredient('Salt', quantity: 'to taste'),
+      RecipeIngredient('Pepper', quantity: 'to taste'),
+      RecipeIngredient('Milk or water', quantity: '2 tablespoons'),
+      RecipeIngredient('Butter or oil', quantity: '1 tablespoon'),
     ],
     tools: [
       'Bowl',

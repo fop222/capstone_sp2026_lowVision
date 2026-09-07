@@ -43,13 +43,15 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       final listId = listResult['id'] as String;
 
       // 2. Insert all ingredients as grocery items.
+      // Shopping-list quantity is always 1 — recipe measurements are for
+      // the cooking page, not for tracking whether the item is needed.
       if (recipe.ingredients.isNotEmpty) {
         await client.from('grocery_items').insert([
           for (final ingredient in recipe.ingredients)
             {
               'list_id': listId,
               'user_id': userId,
-              'name': ingredient,
+              'name': ingredient.name,
               'category': '',
               'is_checked': false,
               'quantity': 1,
@@ -214,9 +216,8 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                     const SizedBox(height: 28),
 
                     // ── Ingredients ─────────────────────────────────────────
-                    _ContentSection(
-                      title: 'Ingredients',
-                      items: recipe.ingredients,
+                    _IngredientsSection(
+                      ingredients: recipe.ingredients,
                     ),
 
                     const SizedBox(height: 28),
@@ -307,7 +308,96 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
   }
 }
 
-// ─── _ContentSection (Ingredients / Tools) ───────────────────────────────────
+// ─── _IngredientsSection ──────────────────────────────────────────────────────
+
+/// Renders the Ingredients section with quantity displayed next to each name.
+///
+/// Example row:  • Milk          1 cup
+///               • Egg           1
+///               • Butter        2 tablespoons
+class _IngredientsSection extends StatelessWidget {
+  const _IngredientsSection({required this.ingredients});
+
+  final List<RecipeIngredient> ingredients;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const RecipeDetailSectionHeading(title: 'Ingredients'),
+        const SizedBox(height: 10),
+        if (ingredients.isEmpty)
+          _PlaceholderText()
+        else
+          for (final ingredient in ingredients)
+            _IngredientItem(ingredient: ingredient),
+      ],
+    );
+  }
+}
+
+/// One ingredient row: bullet + name on the left, quantity on the right.
+class _IngredientItem extends StatelessWidget {
+  const _IngredientItem({required this.ingredient});
+
+  final RecipeIngredient ingredient;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      label: ingredient.quantity.isEmpty
+          ? ingredient.name
+          : '${ingredient.name}, ${ingredient.quantity}',
+      child: ExcludeSemantics(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Bullet
+              const Padding(
+                padding: EdgeInsets.only(top: 2, right: 8),
+                child: Text(
+                  '•',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 18,
+                    height: 1,
+                  ),
+                ),
+              ),
+              // Ingredient name
+              Expanded(
+                child: Text(
+                  ingredient.name,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
+              // Quantity (right-aligned, only when available)
+              if (ingredient.quantity.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                Text(
+                  ingredient.quantity,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: kBrandPurpleLight,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.right,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── _ContentSection (Tools) ─────────────────────────────────────────────────
 
 /// Renders a section heading with either a bullet list or a placeholder.
 class _ContentSection extends StatelessWidget {

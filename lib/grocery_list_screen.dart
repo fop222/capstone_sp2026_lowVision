@@ -656,7 +656,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                 '${stats.total} item${stats.total == 1 ? '' : 's'}'
                                 ' • ${stats.done} done';
 
-                            Future<void> openShop() async {
+                            Future<void> openShop({bool pantryMode = false}) async {
                               try {
                                 final items = await supabase
                                     .from('grocery_items')
@@ -672,6 +672,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                       items: List<Map<String, dynamic>>.from(
                                           items),
                                       cameras: cameras,
+                                      pantryMode: pantryMode,
                                     ),
                                   ),
                                 );
@@ -881,7 +882,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                               child: InkWell(
                                                 borderRadius:
                                                     BorderRadius.circular(10),
-                                                onTap: openShop,
+                                                onTap: () => openShop(pantryMode: true),
                                                 child: Padding(
                                                   padding:
                                                       const EdgeInsets.symmetric(
