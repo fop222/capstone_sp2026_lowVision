@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'grocery_list_screen.dart';
 import 'grocery_ui.dart';
 import 'profile_setup_screen.dart';
+import 'recipe_list_screen.dart';
 import 'supabase_auth_screen.dart';
 
 /// Top-level home after sign-in: choose Shopping, Cooking, or Eating.
@@ -175,7 +176,11 @@ class HomeLandingScreen extends StatelessWidget {
                       label: 'COOKING',
                       icon: Icons.restaurant_menu_outlined,
                       accent: const Color(0xFF3AE4C2),
-                      onPressed: () => _comingSoon(context, 'Cooking'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const RecipeListScreen(),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 18),
                     _modeButton(
