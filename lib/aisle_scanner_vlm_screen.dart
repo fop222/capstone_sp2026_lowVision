@@ -1264,7 +1264,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final pending = _uncheckedPendingShelfItems;
     if (pending.isEmpty) {
       await _speak(
-        'Nothing left to find in this aisle. Tap Next Aisle, or scan the aisle sign again.',
+        widget.pantryMode
+            ? 'Nothing left to find. Try scanning a different shelf area.'
+            : 'Nothing left to find in this aisle. Tap Next Aisle, or scan the aisle sign again.',
       );
       return;
     }
@@ -1437,11 +1439,15 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (still.isNotEmpty) {
       final names = _englishNameList(still.map((e) => e.name).toList());
       await _speak(
-        'Still looking for $names in this aisle. Tap Scan Shelf when you are ready to look again.',
+        widget.pantryMode
+            ? 'Still looking for $names. Tap Scan Shelves when you are ready to look again.'
+            : 'Still looking for $names in this aisle. Tap Scan Shelf when you are ready to look again.',
       );
     } else {
       await _speak(
-        'All items for this aisle are taken care of. Go to the next aisle and scan when you are ready.',
+        widget.pantryMode
+            ? 'All items are taken care of.'
+            : 'All items for this aisle are taken care of. Go to the next aisle and scan when you are ready.',
       );
     }
   }
@@ -1572,9 +1578,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     });
 
     await _restartCamera();
-    await _speak(
-      'Moving to aisle $_currentAisleLabel. Point at the aisle sign and tap Scan Aisle Sign.',
-    );
+    if (!widget.pantryMode) {
+      await _speak(
+        'Moving to aisle $_currentAisleLabel. Point at the aisle sign and tap Scan Aisle Sign.',
+      );
+    }
   }
 
   /// e.g. "5 items done, 2 more to go." — after an item is checked, using current list state.
