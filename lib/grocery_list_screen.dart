@@ -12,6 +12,7 @@ import 'aisle_scanner_vlm_screen.dart';
 import 'profile_setup_screen.dart';
 import 'grocery_list_duplicate.dart';
 import 'grocery_ui.dart';
+import 'recipe_data.dart';
 
 enum _ListsTimeFilter { all, lastList, threeMonths, sixMonths }
 
@@ -685,10 +686,14 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                             }
 
                             return GroceryListCardShell(
-                                  child: Row(
+                                  child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
+                                      Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
                                       Tooltip(
                                         message: 'Start grocery shopping',
                                         child: Material(
@@ -856,8 +861,62 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                           ),
                                         ],
                                       ),
-                                    ],
-                                  ),
+                                        ], // Row children
+                                      ), // Row
+                                      // ── Scan Pantry / Fridge (recipe lists only) ──
+                                      if (isRecipeList(listTitle)) ...[
+                                        const SizedBox(height: 10),
+                                        const Divider(
+                                            color: Colors.white12,
+                                            height: 1),
+                                        const SizedBox(height: 8),
+                                        Semantics(
+                                          button: true,
+                                          label:
+                                              'Scan pantry or refrigerator for items in the $listTitle shopping list',
+                                          child: SizedBox(
+                                            width: double.infinity,
+                                            child: Material(
+                                              color: Colors.transparent,
+                                              child: InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                onTap: openShop,
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                          horizontal: 4,
+                                                          vertical: 8),
+                                                  child: Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        Icons
+                                                            .camera_alt_outlined,
+                                                        size: 20,
+                                                        color: kBrandPurpleLight,
+                                                      ),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        'Scan Pantry / Fridge',
+                                                        style: TextStyle(
+                                                          fontSize: 16,
+                                                          color: kBrandPurpleLight,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ], // Column children
+                                  ), // Column
                                 );
                           },
                         ),

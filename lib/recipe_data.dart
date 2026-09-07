@@ -65,6 +65,20 @@ const List<Recipe> kAllRecipes = [
     difficulty: 1,
     dietaryPreferences: ['Vegetarian'],
     allergens: ['Dairy'],
+    ingredients: [
+      'Yogurt',
+      'Granola',
+      'Strawberries',
+      'Blueberries',
+      'Honey',
+    ],
+    tools: [
+      'Bowl or glass',
+      'Spoon',
+      'Measuring cup',
+      'Knife',
+      'Cutting board',
+    ],
   ),
 
   Recipe(
@@ -75,6 +89,25 @@ const List<Recipe> kAllRecipes = [
     difficulty: 3,
     dietaryPreferences: ['Vegetarian'],
     allergens: ['Wheat / Gluten', 'Dairy', 'Eggs'],
+    ingredients: [
+      'All-purpose flour',
+      'Baking powder',
+      'Sugar',
+      'Salt',
+      'Milk',
+      'Egg',
+      'Butter',
+      'Maple syrup',
+    ],
+    tools: [
+      'Large mixing bowl',
+      'Measuring cups',
+      'Measuring spoons',
+      'Whisk',
+      'Frying pan or griddle',
+      'Spatula',
+      'Ladle or measuring cup for pouring batter',
+    ],
   ),
 
   Recipe(
@@ -85,6 +118,20 @@ const List<Recipe> kAllRecipes = [
     difficulty: 2,
     dietaryPreferences: ['Vegetarian', 'Gluten-Free'],
     allergens: ['Eggs'],
+    ingredients: [
+      'Eggs',
+      'Salt',
+      'Pepper',
+      'Milk or water',
+      'Butter or oil',
+    ],
+    tools: [
+      'Bowl',
+      'Fork or whisk',
+      'Frying pan',
+      'Spatula',
+      'Measuring spoon',
+    ],
   ),
 
   // ── ENTRÉES ──────────────────────────────────────────────────────────────
@@ -161,3 +208,27 @@ const List<Recipe> kAllRecipes = [
     allergens: ['Eggs'],
   ),
 ];
+
+// ─── Recipe-list detection ────────────────────────────────────────────────────
+
+/// Exact names of all 10 predefined recipe-generated grocery lists.
+///
+/// A grocery list is considered a "recipe list" if and only if its title
+/// exactly matches one of these names. Do NOT duplicate this check elsewhere —
+/// always call [isRecipeList] instead.
+const Set<String> kRecipeNames = {
+  'Yogurt Parfait',
+  'Pancakes',
+  'Scrambled Eggs',
+  'Grilled Cheese + Tomato Basil Soup',
+  'Burger',
+  'Pizza',
+  'Veggie Fried Rice',
+  'Spaghetti',
+  'Chocolate Chip Cookies',
+  'Brownies',
+};
+
+/// Returns `true` if [listTitle] exactly matches one of the 10 predefined
+/// recipe names, meaning the list was generated from a recipe.
+bool isRecipeList(String listTitle) => kRecipeNames.contains(listTitle);

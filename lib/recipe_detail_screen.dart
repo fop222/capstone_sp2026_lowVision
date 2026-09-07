@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'grocery_list_screen.dart';
 import 'grocery_ui.dart';
 import 'recipe_data.dart';
 import 'recipe_widgets.dart';
@@ -9,10 +11,74 @@ import 'recipe_widgets.dart';
 /// Shows all metadata (time, difficulty, dietary preferences, allergens) and
 /// placeholder sections for Ingredients, Tools, and Instructions that will be
 /// populated once the content is provided.
-class RecipeDetailScreen extends StatelessWidget {
+class RecipeDetailScreen extends StatefulWidget {
   const RecipeDetailScreen({super.key, required this.recipe});
 
   final Recipe recipe;
+
+  @override
+  State<RecipeDetailScreen> createState() => _RecipeDetailScreenState();
+}
+
+class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
+  bool _startingShop = false;
+
+  Recipe get recipe => widget.recipe;
+
+  /// Creates a new grocery list named after the recipe, inserts all
+  /// ingredients as items, then navigates to the main shopping screen.
+  Future<void> _startShopping() async {
+    setState(() => _startingShop = true);
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) throw Exception('Not signed in.');
+
+      // 1. Create the grocery list.
+      final listResult = await client
+          .from('grocery_lists')
+          .insert({'user_id': userId, 'title': recipe.name})
+          .select('id')
+          .single();
+      final listId = listResult['id'] as String;
+
+      // 2. Insert all ingredients as grocery items.
+      if (recipe.ingredients.isNotEmpty) {
+        await client.from('grocery_items').insert([
+          for (final ingredient in recipe.ingredients)
+            {
+              'list_id': listId,
+              'user_id': userId,
+              'name': ingredient,
+              'category': '',
+              'is_checked': false,
+              'quantity': 1,
+            },
+        ]);
+      }
+
+      // 3. Navigate to the main shopping screen. Pop everything so the user
+      //    lands cleanly on the grocery list home.
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (_) => const GroceryListScreen(),
+        ),
+        // Keep the route below (HomeLandingScreen) so the back arrow works.
+        (route) => route.isFirst,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not start shopping: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _startingShop = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -168,24 +234,67 @@ class RecipeDetailScreen extends StatelessWidget {
 
                     const SizedBox(height: 36),
 
+                    // ── Start Shopping CTA ──────────────────────────────────
+                    // Shown only when the recipe has ingredients to shop for.
+                    if (recipe.ingredients.isNotEmpty) ...[
+                      Semantics(
+                        button: true,
+                        label: 'Start shopping for ${recipe.name}',
+                        child: GroceryGlowButton(
+                          onPressed:
+                              _startingShop ? null : _startShopping,
+                          child: _startingShop
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.shopping_cart_outlined,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Text('Start Shopping'),
+                                  ],
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+
                     // ── Start Cooking CTA ───────────────────────────────────
-                    // Disabled until ingredients and steps have been populated.
-                    if (!recipe.hasDetails) ...[
+                    // Disabled until cooking steps have been populated.
+                    if (!recipe.hasDetails || recipe.steps.isEmpty) ...[
                       Center(
                         child: Text(
-                          'Full recipe details coming soon.',
+                          'Cooking steps coming soon.',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: Colors.white38,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
                     ],
                     GroceryGlowButton(
-                      // onPressed is null (disabled) until steps are available.
-                      onPressed: recipe.hasDetails ? () {} : null,
-                      child: const Text('Start Cooking'),
+                      // Enabled only once cooking steps are available.
+                      onPressed:
+                          recipe.steps.isNotEmpty ? () {} : null,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.local_fire_department_outlined,
+                              size: 22),
+                          const SizedBox(width: 10),
+                          const Text('Start Cooking'),
+                        ],
+                      ),
                     ),
                   ],
                 ),
