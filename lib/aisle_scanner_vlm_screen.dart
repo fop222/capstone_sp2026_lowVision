@@ -2967,6 +2967,46 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final shelfStatusEmpty = _shelfStatusMessage.isEmpty;
 
     Widget shelfActionRow() {
+      // ── Pantry / Fridge mode ──────────────────────────────────────────────
+      if (widget.pantryMode) {
+        return Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  onPressed: _onGoToShelf,
+                  style: ElevatedButton.styleFrom(
+                    textStyle: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  child: const Text('Scan Another Area'),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SizedBox(
+                height: 56,
+                child: OutlinedButton(
+                  onPressed: _onEndShopping,
+                  style: OutlinedButton.styleFrom(
+                    textStyle: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  child: const Text('Done'),
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+
+      // ── Grocery aisle mode ────────────────────────────────────────────────
       return Row(
         children: [
           Expanded(
@@ -3035,10 +3075,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 if (shouldShowMoveAlongRescan) ...[
                   shelfActionRow(),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Take a few steps along this aisle and scan the shelf again.',
+                  Text(
+                    widget.pantryMode
+                        ? 'Try pointing at a different area of your pantry or fridge.'
+                        : 'Take a few steps along this aisle and scan the shelf again.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 22, color: Colors.white70),
+                    style: const TextStyle(fontSize: 22, color: Colors.white70),
                   ),
                   const SizedBox(height: 20),
                 ],
