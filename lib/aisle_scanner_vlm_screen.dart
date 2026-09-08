@@ -1173,6 +1173,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     }
     return found;
   }
+
+  Future<void> _onScanAisleSign({bool fromGallery = false}) async {
     final Uint8List? bytes =
         fromGallery ? await _pickFromGallery() : await _capturePhoto();
     if (bytes == null) return;
