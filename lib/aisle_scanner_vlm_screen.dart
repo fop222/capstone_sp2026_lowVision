@@ -1313,7 +1313,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       _error = null;
     });
 
-    await _speak('Reading shelf.');
+    await _speak(
+      widget.pantryMode ? 'Scanning your pantry.' : 'Reading shelf.',
+    );
 
     final shelfText = await _runOcr(bytes);
     final targets = _uncheckedPendingShelfItems;
@@ -1638,7 +1640,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     await _speak('${item.name} checked off. $progress');
     final allDone = _items.isNotEmpty && _items.every((i) => i.isChecked);
     if (!allDone) return false;
-    await _speak('Congrats, you are done grocery shopping!');
+    await _speak(
+      widget.pantryMode
+          ? 'All items found! Your pantry check is complete.'
+          : 'Congrats, you are done grocery shopping!',
+    );
     if (!mounted) return true;
     await _onEndShopping();
     return true;
@@ -1648,7 +1654,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   Future<void> _maybeFinishShoppingAfterManualCheckOff(_Item item) async {
     final allDone = _items.isNotEmpty && _items.every((i) => i.isChecked);
     if (!allDone) return;
-    await _speak('Congrats, you are done shopping!');
+    await _speak(
+      widget.pantryMode
+          ? 'All items found! Your pantry check is complete.'
+          : 'Congrats, you are done shopping!',
+    );
     if (!mounted) return;
     await _onEndShopping();
   }
