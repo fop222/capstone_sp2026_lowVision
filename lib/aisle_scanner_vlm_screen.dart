@@ -1445,24 +1445,15 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     for (final item in foundTargets) {
       if (!mounted) return;
-      if (widget.pantryMode) {
-        // Pantry / Fridge mode: auto-check without a confirmation dialog.
-        // The user is confirming what is already in their fridge/pantry.
+      final wantCheck = await _showCheckOffItemDialog(itemName: item.name);
+      if (!mounted) return;
+      if (wantCheck == true) {
         setState(() => item.isChecked = true);
         await _saveItemCheckedState(item);
         final ended = await _speakAfterScanCheckOffWithOptionalFinish(item);
         if (ended) return;
-      } else {
-        final wantCheck = await _showCheckOffItemDialog(itemName: item.name);
-        if (!mounted) return;
-        if (wantCheck == true) {
-          setState(() => item.isChecked = true);
-          await _saveItemCheckedState(item);
-          final ended = await _speakAfterScanCheckOffWithOptionalFinish(item);
-          if (ended) return;
-        } else if (wantCheck == false) {
-          await _speak('Okay. ${item.name} is still on your list.');
-        }
+      } else if (wantCheck == false) {
+        await _speak('Okay. ${item.name} is still on your list.');
       }
     }
 
@@ -1522,7 +1513,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   Future<bool?> _showCheckOffItemDialog({required String itemName}) async {
     await _speak(
-      'This looks like a match for $itemName. Do you want to check it off your list? Yes or no.',
+      widget.pantryMode
+          ? '$itemName was detected in your pantry or fridge. Do you want to check it off your list? Yes or no.'
+          : 'This looks like a match for $itemName. Do you want to check it off your list? Yes or no.',
     );
     if (!mounted) return null;
 
@@ -1530,9 +1523,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text(
-          'Looks like a match',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+        title: Text(
+          widget.pantryMode ? 'Found in Pantry / Fridge' : 'Looks like a match',
+          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
         ),
         content: SingleChildScrollView(
           child: Column(
@@ -1542,9 +1535,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Looking for: ',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                  Text(
+                    widget.pantryMode ? 'Detected: ' : 'Looking for: ',
+                    style: const TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.w600),
                   ),
                   Expanded(
                     child: Text(
@@ -1558,9 +1552,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              const Text(
-                'Do you want to check this item off your list?',
-                style: TextStyle(fontSize: 24, height: 1.3),
+              Text(
+                widget.pantryMode
+                    ? 'Check this off your list?'
+                    : 'Do you want to check this item off your list?',
+                style: const TextStyle(fontSize: 24, height: 1.3),
               ),
               const SizedBox(height: 24),
               Row(
