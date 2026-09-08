@@ -2361,9 +2361,14 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         : 'Grocery Aisle $_currentAisleLabel';
 
     return PopScope(
-      canPop: !_shoppingMenuOpen && !_fullScreenListOpen,
+      // In pantry mode always intercept back so _onEndShopping saves progress.
+      canPop: !widget.pantryMode && !_shoppingMenuOpen && !_fullScreenListOpen,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (widget.pantryMode) {
+          _onEndShopping();
+          return;
+        }
         if (_fullScreenListOpen) {
           _closeFullScreenList();
           return;
@@ -2395,9 +2400,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                         onPressed: _closeShoppingMenuWithCameraResume,
                       ),
                     )
-                  : null,
+                  : widget.pantryMode
+                      ? Tooltip(
+                          message: 'Exit pantry check',
+                          child: IconButton(
+                            icon: const Icon(Icons.close),
+                            tooltip: 'Exit pantry check',
+                            onPressed: _onEndShopping,
+                          ),
+                        )
+                      : null,
           automaticallyImplyLeading:
-              !_shoppingMenuOpen && !_fullScreenListOpen,
+              !widget.pantryMode && !_shoppingMenuOpen && !_fullScreenListOpen,
           actions: [
             if (!_shoppingMenuOpen && !_fullScreenListOpen)
               _shoppingMenuAppBarControl(context),
