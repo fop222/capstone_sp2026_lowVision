@@ -2544,7 +2544,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   child: Container(
                     color: Colors.black87,
                     padding: const EdgeInsets.all(16),
-                    child: isAisle
+                    child: (isAisle && !widget.pantryMode)
                         ? const Text(
                             'Point at the aisle sign',
                             textAlign: TextAlign.center,
@@ -2647,7 +2647,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                     child: ElevatedButton(
                       onPressed: (_loading || _takingPicture)
                           ? null
-                          : (isAisle ? _onScanAisleSign : _onScanShelf),
+                          : (isAisle && !widget.pantryMode
+                              ? _onScanAisleSign
+                              : _onScanShelf),
                       child: Text(
                         widget.pantryMode
                             ? 'Scan Shelves'
@@ -2664,7 +2666,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                     child: OutlinedButton(
                       onPressed: (_loading || _takingPicture)
                           ? null
-                          : () => isAisle
+                          : () => (isAisle && !widget.pantryMode)
                               ? _onScanAisleSign(fromGallery: true)
                               : _onScanShelf(fromGallery: true),
                       child: const Text('Use Gallery Image'),
@@ -2672,7 +2674,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   ),
                 ],
               ),
-              if (isAisle && _showAisleUnclearEmployeeOption) ...[
+              if (isAisle && !widget.pantryMode && _showAisleUnclearEmployeeOption) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   height: 56,
