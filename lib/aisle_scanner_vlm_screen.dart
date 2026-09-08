@@ -1394,8 +1394,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (multiShelf) {
       final wanted = _englishNameList(targets.map((e) => e.name).toList());
       if (foundTargets.isEmpty) {
-        shelfUser =
-            'Could not confirm $wanted on this shelf. Tap Scan Shelf to try again.';
+        shelfUser = widget.pantryMode
+            ? 'Could not confirm $wanted in your pantry or fridge. Tap Scan Shelves to try again.'
+            : 'Could not confirm $wanted on this shelf. Tap Scan Shelf to try again.';
       } else {
         final deduped = _shelfDisplayFromVlmAnswer(vlmAnswer);
         shelfUser = deduped.isEmpty
@@ -1442,15 +1443,24 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     for (final item in foundTargets) {
       if (!mounted) return;
-      final wantCheck = await _showCheckOffItemDialog(itemName: item.name);
-      if (!mounted) return;
-      if (wantCheck == true) {
+      if (widget.pantryMode) {
+        // Pantry / Fridge mode: auto-check without a confirmation dialog.
+        // The user is confirming what is already in their fridge/pantry.
         setState(() => item.isChecked = true);
         await _saveItemCheckedState(item);
         final ended = await _speakAfterScanCheckOffWithOptionalFinish(item);
         if (ended) return;
-      } else if (wantCheck == false) {
-        await _speak('Okay. ${item.name} is still on your list.');
+      } else {
+        final wantCheck = await _showCheckOffItemDialog(itemName: item.name);
+        if (!mounted) return;
+        if (wantCheck == true) {
+          setState(() => item.isChecked = true);
+          await _saveItemCheckedState(item);
+          final ended = await _speakAfterScanCheckOffWithOptionalFinish(item);
+          if (ended) return;
+        } else if (wantCheck == false) {
+          await _speak('Okay. ${item.name} is still on your list.');
+        }
       }
     }
 
