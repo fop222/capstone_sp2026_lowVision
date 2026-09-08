@@ -1130,14 +1130,16 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         (targetOnShelfByOcr || !shelfMatchesOtherListItem);
   }
 
-  /// Parses the pantry VLM response for "FOUND: [name]" lines and fuzzy-matches
-  /// them against the pending list [targets].  Returns every target whose name
-  /// is matched by at least one FOUND line.
+  /// Parses the open-ended pantry VLM response (one food item per line) and
+  /// fuzzy-matches each detected item against [targets].
+  /// Returns every target whose name is confidently matched by at least one line.
   List<_Item> _parsePantryFoundItems(String answer, List<_Item> targets) {
-    // Treat a bare "NOT FOUND" (or "NONE FOUND") as an explicit negative.
     final upper = answer.trim().toUpperCase();
-    if (upper == 'NOT FOUND' ||
+    // Model explicitly found nothing.
+    if (upper == 'NONE' ||
+        upper == 'NOT FOUND' ||
         upper == 'NONE FOUND' ||
+        upper.startsWith('NONE\n') ||
         upper.startsWith('NOT FOUND\n') ||
         upper.startsWith('NONE FOUND\n')) {
       return [];
@@ -1147,26 +1149,25 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final lines = answer
         .split(RegExp(r'\r?\n'))
         .map((l) => l.trim())
-        .where((l) => l.isNotEmpty);
+        // Drop empty lines and lines that look like preamble/explanation text
+        .where((l) => l.isNotEmpty && !l.endsWith(':') && !l.startsWith('-'));
 
     for (final line in lines) {
-      // Accept "FOUND: X", "Found: X", etc.
-      final match =
-          RegExp(r'^FOUND:\s*(.+)$', caseSensitive: false).firstMatch(line);
-      if (match == null) continue;
-      final detected = match.group(1)!.trim();
+      // Strip any stray leading bullets or numbers (e.g. "1. Yogurt" → "Yogurt")
+      final cleaned = line.replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), '');
+      if (cleaned.isEmpty) continue;
 
       for (final target in targets) {
         if (found.contains(target)) continue;
-        // Simple substring check (case-insensitive) — enough for ingredient names.
         final tLow = target.name.toLowerCase();
-        final dLow = detected.toLowerCase();
+        final dLow = cleaned.toLowerCase();
+        // Substring match (handles "Greek Yogurt" matching target "Yogurt", etc.)
         if (dLow.contains(tLow) || tLow.contains(dLow)) {
           found.add(target);
           continue;
         }
-        // Fallback: token fuzzy match using the existing helper.
-        if (_vlmAnswerMatchesTarget(detected, target)) {
+        // Fallback: existing token-level fuzzy helper
+        if (_vlmAnswerMatchesTarget(cleaned, target)) {
           found.add(target);
         }
       }
@@ -1377,26 +1378,17 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     if (widget.pantryMode && targets.isNotEmpty) {
       // ── Pantry / Fridge prompt ────────────────────────────────────────────
-      // Simple FOUND:/NOT FOUND format — no retail structured format required.
-      // Works for loose produce, containers, and any home-storage item.
-      if (singleTarget != null) {
-        question =
-            gatePreamble +
-            'You are checking a refrigerator, pantry, or kitchen cabinet. '
-            'Is "${singleTarget.name}" clearly visible in this photo? '
-            'If yes, respond with exactly: FOUND: ${singleTarget.name}\n'
-            'If no, respond with exactly: NOT FOUND';
-      } else {
-        final listed = targets.map((t) => t.name).join(', ');
-        question =
-            gatePreamble +
-            'You are checking a refrigerator, pantry, or kitchen cabinet. '
-            'Look carefully for these ingredients: $listed. '
-            'For each ingredient you can CLEARLY see, write one line: FOUND: [ingredient name]. '
-            'Use the exact ingredient name from the list above. '
-            'If none are visible, write: NOT FOUND. '
-            'Do not mention anything that is not in the list.';
-      }
+      // Open-ended detection: ask WHAT is visible (no list supplied to the
+      // model) then cross-reference the answer against targets client-side.
+      // This prevents the model from hallucinating items it was primed to find.
+      question =
+          gatePreamble +
+          'Look carefully at this photo of a refrigerator, pantry, or kitchen cabinet. '
+          'List ONLY the food items you can clearly and certainly identify in the image. '
+          'Be very conservative — if you are not 100% sure what an item is, do NOT list it. '
+          'Write one item per line using just the food name (no brand, no description). '
+          'Example:\nGreek Yogurt\nMilk\nOrange Juice\n'
+          'If you cannot confidently identify any food items, write exactly: NONE';
     } else if (targets.isEmpty) {
       question =
           gatePreamble +
