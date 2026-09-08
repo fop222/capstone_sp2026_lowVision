@@ -1130,7 +1130,49 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         (targetOnShelfByOcr || !shelfMatchesOtherListItem);
   }
 
-  Future<void> _onScanAisleSign({bool fromGallery = false}) async {
+  /// Parses the pantry VLM response for "FOUND: [name]" lines and fuzzy-matches
+  /// them against the pending list [targets].  Returns every target whose name
+  /// is matched by at least one FOUND line.
+  List<_Item> _parsePantryFoundItems(String answer, List<_Item> targets) {
+    // Treat a bare "NOT FOUND" (or "NONE FOUND") as an explicit negative.
+    final upper = answer.trim().toUpperCase();
+    if (upper == 'NOT FOUND' ||
+        upper == 'NONE FOUND' ||
+        upper.startsWith('NOT FOUND\n') ||
+        upper.startsWith('NONE FOUND\n')) {
+      return [];
+    }
+
+    final found = <_Item>[];
+    final lines = answer
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty);
+
+    for (final line in lines) {
+      // Accept "FOUND: X", "Found: X", etc.
+      final match =
+          RegExp(r'^FOUND:\s*(.+)$', caseSensitive: false).firstMatch(line);
+      if (match == null) continue;
+      final detected = match.group(1)!.trim();
+
+      for (final target in targets) {
+        if (found.contains(target)) continue;
+        // Simple substring check (case-insensitive) — enough for ingredient names.
+        final tLow = target.name.toLowerCase();
+        final dLow = detected.toLowerCase();
+        if (dLow.contains(tLow) || tLow.contains(dLow)) {
+          found.add(target);
+          continue;
+        }
+        // Fallback: token fuzzy match using the existing helper.
+        if (_vlmAnswerMatchesTarget(detected, target)) {
+          found.add(target);
+        }
+      }
+    }
+    return found;
+  }
     final Uint8List? bytes =
         fromGallery ? await _pickFromGallery() : await _capturePhoto();
     if (bytes == null) return;
@@ -1331,7 +1373,29 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final gatePreamble =
         widget.pantryMode ? _kPantrySceneGatePreamble : _kShelfSceneGatePreamble;
 
-    if (targets.isEmpty) {
+    if (widget.pantryMode && targets.isNotEmpty) {
+      // ── Pantry / Fridge prompt ────────────────────────────────────────────
+      // Simple FOUND:/NOT FOUND format — no retail structured format required.
+      // Works for loose produce, containers, and any home-storage item.
+      if (singleTarget != null) {
+        question =
+            gatePreamble +
+            'You are checking a refrigerator, pantry, or kitchen cabinet. '
+            'Is "${singleTarget.name}" clearly visible in this photo? '
+            'If yes, respond with exactly: FOUND: ${singleTarget.name}\n'
+            'If no, respond with exactly: NOT FOUND';
+      } else {
+        final listed = targets.map((t) => t.name).join(', ');
+        question =
+            gatePreamble +
+            'You are checking a refrigerator, pantry, or kitchen cabinet. '
+            'Look carefully for these ingredients: $listed. '
+            'For each ingredient you can CLEARLY see, write one line: FOUND: [ingredient name]. '
+            'Use the exact ingredient name from the list above. '
+            'If none are visible, write: NOT FOUND. '
+            'Do not mention anything that is not in the list.';
+      }
+    } else if (targets.isEmpty) {
       question =
           gatePreamble +
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
@@ -1367,19 +1431,25 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     setState(() => _loading = false);
 
     if (shelfText == null) {
-      await _speak('Could not read the shelf text. Please try again.');
-      await _clearPreviewAndRestartCamera();
-      return;
+      // In pantry mode the OCR text is not needed — the VLM works visually.
+      if (!widget.pantryMode) {
+        await _speak('Could not read the shelf text. Please try again.');
+        await _clearPreviewAndRestartCamera();
+        return;
+      }
     }
 
-    _shelfOcrText = shelfText;
+    _shelfOcrText = shelfText ?? '';
     _vlmAnswer = vlmAnswer;
-    _shelfMatches = _matchItems(shelfText);
+    _shelfMatches = widget.pantryMode ? [] : _matchItems(shelfText ?? '');
 
     final matchedNames = _shelfMatches.map((i) => i.name).join(', ');
 
     final List<_Item> foundTargets;
-    if (targets.isEmpty) {
+    if (widget.pantryMode && targets.isNotEmpty) {
+      // Parse "FOUND: X" lines from the pantry VLM response.
+      foundTargets = _parsePantryFoundItems(vlmAnswer, targets);
+    } else if (targets.isEmpty) {
       foundTargets = [];
     } else if (singleTarget != null) {
       final ok = _shelfItemAppearsFound(
