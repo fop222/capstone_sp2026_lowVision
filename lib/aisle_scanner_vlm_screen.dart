@@ -350,6 +350,16 @@ const _kShelfSceneGatePreamble =
     'respond with exactly this single line and nothing else: NO ITEMS FOUND\n'
     'If it does show appropriate shelving, continue:\n';
 
+/// Gate preamble for Pantry / Fridge mode — accepts home storage (fridge shelves,
+/// pantry shelves, kitchen cabinets) instead of insisting on a retail store shelf.
+const _kPantrySceneGatePreamble =
+    'First, decide whether this photo clearly shows food items, beverages, or grocery products '
+    'stored on shelves, in a refrigerator, or in a pantry / kitchen cabinet. '
+    'If it shows anything completely unrelated to food storage (such as a vehicle interior, '
+    'outdoor scenery, people, pets, or a completely empty surface with no products), '
+    'respond with exactly this single line and nothing else: NO ITEMS FOUND\n'
+    'If it does show food or grocery products, continue:\n';
+
 /// Shelf-scan VLM: fixed labels per product; omit optional lines when unknown.
 const _kShelfStructuredFormat =
     'For each distinct product, write one block using exactly these line labels (each on its own line, in this order). '
@@ -892,8 +902,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     required bool targetFound,
   }) {
     if (_vlmPhotoRejectedNonShelf(vlmAnswer)) {
-      return 'This photo does not look like a grocery shelf. Point the camera at the '
-          'shelf products and tap Scan Shelf again.';
+      return widget.pantryMode
+          ? 'Could not identify items. Make sure the food items in your pantry or fridge are visible and tap Scan Shelves again.'
+          : 'This photo does not look like a grocery shelf. Point the camera at the '
+              'shelf products and tap Scan Shelf again.';
     }
     final cleanedRaw = _vlmAnswerWithoutFoundTags(vlmAnswer);
     final cleaned = _finalizeShelfDisplayText(
@@ -906,7 +918,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final hasMatches = matchedNames.isNotEmpty;
 
     if (target != null && !targetFound) {
-      return 'No ${target.name} found. Keep moving along the aisle.';
+      return widget.pantryMode
+          ? 'No ${target.name} found. Try scanning a different shelf area.'
+          : 'No ${target.name} found. Keep moving along the aisle.';
     }
 
     if (target == null) {
@@ -1303,16 +1317,19 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final singleTarget = targets.length == 1 ? targets.first : null;
 
     String question;
+    final gatePreamble =
+        widget.pantryMode ? _kPantrySceneGatePreamble : _kShelfSceneGatePreamble;
+
     if (targets.isEmpty) {
       question =
-          _kShelfSceneGatePreamble +
+          gatePreamble +
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
               'List each distinct branded product you can clearly see (each different flavor or variety is its own block). '
               '$_kShelfStructuredFormat '
               'If many facings are the same flavor, describe it once—do not repeat the same flavor for each physical unit.';
     } else if (singleTarget != null) {
       question =
-          _kShelfSceneGatePreamble +
+          gatePreamble +
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
               'Check if any visible product visually matches "${singleTarget.name}" (include the exact type or flavor if that matters, not only the brand). '
               'If it matches, list each distinct flavor or variant you can see—one block per flavor, not one block per identical can or bottle. '
@@ -1323,7 +1340,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     } else {
       final quoted = targets.map((t) => '"${t.name}"').join(', ');
       question =
-          _kShelfSceneGatePreamble +
+          gatePreamble +
           'Do NOT read any text, labels, or signs. Use only visual appearance. '
               'The shopper is looking for ALL of these list items on this shelf at the same time: $quoted. '
               'For each list item you can clearly see, output at most one block per distinct flavor (not one block per identical unit). '
