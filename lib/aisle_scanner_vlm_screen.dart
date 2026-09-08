@@ -463,8 +463,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       },
     )..mount();
     // Pantry mode skips the aisle-sign phase and goes straight to shelf scan.
+    // All unchecked list items are pending from the start.
     if (widget.pantryMode) {
       _phase = _Phase.shelf;
+      _pendingShelfItems = _items.toList();
     }
     _tts.awaitSpeakCompletion(true);
     unawaited(_syncTtsLanguage());
@@ -1271,6 +1273,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       _shelfMatches = [];
       _lastShelfTargetFound = false;
       _lastShelfTargetName = null;
+      // In pantry mode re-seed pending items so newly-checked items are excluded.
+      if (widget.pantryMode) {
+        _pendingShelfItems = List<_Item>.from(_items);
+      }
     });
 
     await _restartCamera();
@@ -1439,7 +1445,14 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       }
     });
 
-    await _announceTts(shelfUser);
+    // Pantry mode: announce only the matched ingredient names, not the full
+    // VLM brand/size/location output.
+    if (widget.pantryMode && foundTargets.isNotEmpty) {
+      final names = _englishNameList(foundTargets.map((i) => i.name).toList());
+      await _speak('$names detected.');
+    } else {
+      await _announceTts(shelfUser);
+    }
 
     if (foundTargets.isEmpty) return;
 
