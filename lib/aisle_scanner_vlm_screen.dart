@@ -1457,14 +1457,14 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       final ok = _shelfItemAppearsFound(
         singleTarget,
         vlmAnswer,
-        shelfText,
+        shelfText ?? '',
         _shelfMatches,
       );
       foundTargets = ok ? [singleTarget] : [];
     } else {
       foundTargets = targets
           .where(
-            (t) => _shelfItemAppearsFound(t, vlmAnswer, shelfText, _shelfMatches),
+            (t) => _shelfItemAppearsFound(t, vlmAnswer, shelfText ?? '', _shelfMatches),
           )
           .toList();
     }
