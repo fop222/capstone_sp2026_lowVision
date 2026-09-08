@@ -1286,13 +1286,16 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     }
     if (pending.length == 1) {
       await _speak(
-        'Point your camera at the shelf for ${pending.first.name}, then tap Scan Shelf.',
+        widget.pantryMode
+            ? 'Point your camera at the shelves for ${pending.first.name}, then tap Scan Shelves.'
+            : 'Point your camera at the shelf for ${pending.first.name}, then tap Scan Shelf.',
       );
     } else {
       final list = _englishNameList(pending.map((e) => e.name).toList());
       await _speak(
-        'Point your camera at the shelf. Look for all of these on the same shelf: $list. '
-        'Then tap Scan Shelf.',
+        widget.pantryMode
+            ? 'Point your camera at the shelves. Look for all of these: $list. Then tap Scan Shelves.'
+            : 'Point your camera at the shelf. Look for all of these on the same shelf: $list. Then tap Scan Shelf.',
       );
     }
   }
