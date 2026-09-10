@@ -123,27 +123,57 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
 
                     const SizedBox(height: 14),
 
-                    // ── Time + difficulty ───────────────────────────────────
+                    // ── Time + servings + difficulty ───────────────────────
                     Semantics(
-                      label:
-                          '${recipe.estimatedTimeMinutes} minutes. Difficulty ${recipe.difficulty} out of 5.',
+                      label: [
+                        '${recipe.estimatedTimeMinutes} minutes.',
+                        if (recipe.servings != null)
+                          'Servings: ${recipe.servings}.',
+                        'Difficulty ${recipe.difficulty} out of 5.',
+                      ].join(' '),
                       child: ExcludeSemantics(
-                        child: Row(
+                        child: Wrap(
+                          spacing: 20,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            Icon(
-                              Icons.access_time_rounded,
-                              size: 20,
-                              color: kBrandPurpleLight,
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.access_time_rounded,
+                                  size: 20,
+                                  color: kBrandPurpleLight,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '~${recipe.estimatedTimeMinutes} min',
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    color: kBrandPurpleLight,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '~${recipe.estimatedTimeMinutes} min',
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: kBrandPurpleLight,
-                                fontWeight: FontWeight.w600,
+                            if (recipe.servings != null)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.people_outline_rounded,
+                                    size: 20,
+                                    color: kBrandPurpleLight,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Serves ${recipe.servings}',
+                                    style: theme.textTheme.bodyLarge?.copyWith(
+                                      color: kBrandPurpleLight,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            const SizedBox(width: 20),
                             RecipeDifficultyRow(difficulty: recipe.difficulty),
                           ],
                         ),
@@ -220,20 +250,20 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                       ingredients: recipe.ingredients,
                     ),
 
-                    const SizedBox(height: 28),
+                    // ── Tools (hidden for imported recipes) ─────────────
+                    if (!recipe.isImported) ...[
+                      const SizedBox(height: 28),
+                      _ContentSection(
+                        title: 'Tools',
+                        items: recipe.tools,
+                      ),
+                    ],
 
-                    // ── Tools ───────────────────────────────────────────────
-                    _ContentSection(
-                      title: 'Tools',
-                      items: recipe.tools,
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    // ── Instructions ────────────────────────────────────────
-                    // Hidden until cooking steps have been provided.
-                    if (recipe.steps.isNotEmpty)
+                    // ── Instructions (hidden for imported + unpopulated) ──
+                    if (!recipe.isImported && recipe.steps.isNotEmpty) ...[
+                      const SizedBox(height: 28),
                       _InstructionsSection(steps: recipe.steps),
+                    ],
 
                     const SizedBox(height: 36),
 

@@ -12,6 +12,7 @@ import 'aisle_scanner_vlm_screen.dart';
 import 'profile_setup_screen.dart';
 import 'grocery_list_duplicate.dart';
 import 'grocery_ui.dart';
+import 'imported_recipes_state.dart';
 import 'recipe_data.dart';
 
 enum _ListsTimeFilter { all, lastList, threeMonths, sixMonths }
@@ -865,7 +866,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                         ], // Row children
                                       ), // Row
                                       // ── Scan Pantry / Fridge (recipe lists only) ──
-                                      if (isRecipeList(listTitle)) ...[
+                                      if (isRecipeList(listTitle) || isImportedRecipeList(listTitle)) ...[
                                         const SizedBox(height: 10),
                                         const Divider(
                                             color: Colors.white12,

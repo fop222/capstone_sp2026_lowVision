@@ -22,3 +22,9 @@ void addImportedRecipe(Recipe recipe) {
 /// The extra category label used for recipes whose category cannot be
 /// determined from the imported data.
 const String kImportedCategory = 'Imported Recipes';
+
+/// Returns true if [listTitle] matches any currently-imported recipe name.
+/// Complements [isRecipeList] from recipe_data.dart which covers the 10
+/// built-in recipes.
+bool isImportedRecipeList(String listTitle) =>
+    importedRecipesNotifier.value.any((r) => r.name == listTitle);

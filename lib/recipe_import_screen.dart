@@ -467,6 +467,9 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
     minutes = _parseDuration(s['cookTime']) + _parseDuration(s['prepTime']);
   }
 
+  // ── Servings ──────────────────────────────────────────────────────────
+  final servings = _parseServings(s['recipeYield']);
+
   // ── Ingredients ───────────────────────────────────────────────────────
   final rawIngredients = s['recipeIngredient'];
   final ingredients = <RecipeIngredient>[];
@@ -474,9 +477,10 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
     for (final item in rawIngredients) {
       final text = _str(item)?.trim() ?? '';
       if (text.isEmpty) continue;
-      // Try to split "2 cups flour" into quantity "2 cups" + name "flour"
       final parts = _splitQuantityName(text);
-      ingredients.add(RecipeIngredient(parts.$2, quantity: parts.$1));
+      final cleanedName = _cleanIngredientName(parts.$2);
+      if (cleanedName.isEmpty) continue;
+      ingredients.add(RecipeIngredient(cleanedName, quantity: parts.$1));
     }
   }
 
@@ -494,8 +498,10 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
       }
     }
   } else if (rawSteps is String) {
-    steps.addAll(
-        rawSteps.split(RegExp(r'\n+')).map((l) => l.trim()).where((l) => l.isNotEmpty));
+    steps.addAll(rawSteps
+        .split(RegExp(r'\n+'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty));
   }
 
   // ── Category ──────────────────────────────────────────────────────────
@@ -504,7 +510,7 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
   // ── Dietary / allergen hints ───────────────────────────────────────────
   final dietaryPrefs = _parseDietaryPrefs(s);
 
-  // ── Build id from URL ─────────────────────────────────────────────────
+  // ── Build id from timestamp ───────────────────────────────────────────
   final id = 'imported_${DateTime.now().millisecondsSinceEpoch}';
 
   return Recipe(
@@ -512,12 +518,15 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
     name: name,
     category: category,
     estimatedTimeMinutes: minutes,
-    difficulty: 2, // unknown; default to mid-range
-    dietaryPreferences: dietaryPrefs.isEmpty ? ['No Restrictions'] : dietaryPrefs,
+    difficulty: 2,
+    dietaryPreferences:
+        dietaryPrefs.isEmpty ? ['No Restrictions'] : dietaryPrefs,
     allergens: const [],
     ingredients: ingredients,
     tools: const [],
     steps: steps,
+    servings: servings,
+    isImported: true,
   );
 }
 
@@ -597,4 +606,30 @@ List<String> _parseDietaryPrefs(Map<dynamic, dynamic> s) {
     }
   }
   return tags;
+}
+
+/// Removes parenthetical text and everything after the first comma from an
+/// ingredient name.
+/// Examples:
+///   "kosher salt, plus more to taste"      → "kosher salt"
+///   "breadcrumbs (or panko)"               → "breadcrumbs"
+///   "ham or prosciutto"                    → "ham or prosciutto"
+String _cleanIngredientName(String raw) {
+  // Remove anything inside parentheses (including the parens).
+  var s = raw.replaceAll(RegExp(r'\(.*?\)'), '');
+  // Remove everything after the first comma.
+  final commaIdx = s.indexOf(',');
+  if (commaIdx >= 0) s = s.substring(0, commaIdx);
+  return s.trim();
+}
+
+/// Parses recipeYield into an integer serving count.
+/// Handles: "6", "6 servings", "Serves 6", ["6 servings"].
+int? _parseServings(dynamic raw) {
+  final s = _str(raw) ?? '';
+  if (s.isEmpty) return null;
+  final m = RegExp(r'(\d+)').firstMatch(s);
+  if (m == null) return null;
+  final n = int.tryParse(m.group(1)!);
+  return (n != null && n > 0) ? n : null;
 }

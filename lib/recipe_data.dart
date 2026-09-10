@@ -49,6 +49,14 @@ class Recipe {
   final List<String> tools;
   final List<String> steps;
 
+  /// Number of servings — only populated for imported recipes when the source
+  /// site provides recipeYield.  Null means unknown / not displayed.
+  final int? servings;
+
+  /// True for recipes added via "Import Recipe from Link".
+  /// Used to hide Tools / Instructions on the detail page.
+  final bool isImported;
+
   const Recipe({
     required this.id,
     required this.name,
@@ -60,6 +68,8 @@ class Recipe {
     this.ingredients = const [],
     this.tools = const [],
     this.steps = const [],
+    this.servings,
+    this.isImported = false,
   });
 
   /// True once ingredients and/or steps have been added.

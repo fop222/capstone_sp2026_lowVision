@@ -110,6 +110,19 @@ class _RecipeListBody extends StatelessWidget {
                       child: _ImportButton(onTap: onOpenImport),
                     ),
 
+                    // ── Imported recipes — shown at the top (session-only) ──
+                    if (importedRecipes.isNotEmpty) ...[
+                      RecipeSectionHeader(title: 'Imported Recipes'),
+                      for (final recipe in importedRecipes) ...[
+                        _RecipeCard(
+                          recipe: recipe,
+                          onTap: () => onOpenRecipe(recipe),
+                          isImported: true,
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                    ],
+
                     // ── Built-in category sections ───────────────────────
                     for (final category in kRecipeCategories) ...[
                       RecipeSectionHeader(title: category),
@@ -123,31 +136,7 @@ class _RecipeListBody extends StatelessWidget {
                       ],
                     ],
 
-                    // ── Imported recipes (session-only) ──────────────────
-                    if (importedRecipes.isNotEmpty) ...[
-                      // Group by category
-                      for (final category in [
-                        ...kRecipeCategories,
-                        kImportedCategory,
-                      ]) ...[
-                        if (importedRecipes.any((r) => r.category == category)) ...[
-                          RecipeSectionHeader(
-                            title: category == kImportedCategory
-                                ? kImportedCategory
-                                : '$category (Imported)',
-                          ),
-                          for (final recipe in importedRecipes
-                              .where((r) => r.category == category)) ...[
-                            _RecipeCard(
-                              recipe: recipe,
-                              onTap: () => onOpenRecipe(recipe),
-                              isImported: true,
-                            ),
-                            const SizedBox(height: 14),
-                          ],
-                        ],
-                      ],
-                    ],
+                    // (Imported recipes appear above — see top of column)
                   ],
                 ),
               ),
