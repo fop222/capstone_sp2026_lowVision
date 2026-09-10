@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 
 import 'grocery_ui.dart';
+import 'imported_recipes_state.dart';
 import 'recipe_data.dart';
 import 'recipe_detail_screen.dart';
+import 'recipe_import_screen.dart';
 import 'recipe_widgets.dart';
 
 /// One vertically scrollable page showing all 10 recipes organised into
 /// three clearly separated sections: Breakfast → Entrées → Desserts.
+/// Imported recipes (session-only) appear beneath a 4th "Imported Recipes"
+/// section when present.
 ///
 /// Tapping any recipe card navigates to [RecipeDetailScreen].
 class RecipeListScreen extends StatelessWidget {
@@ -19,6 +23,42 @@ class RecipeListScreen extends StatelessWidget {
       ),
     );
   }
+
+  void _openImport(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const RecipeImportScreen(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Rebuild whenever imported recipes change.
+    return ValueListenableBuilder<List<Recipe>>(
+      valueListenable: importedRecipesNotifier,
+      builder: (context, importedRecipes, _) =>
+          _RecipeListBody(
+            importedRecipes: importedRecipes,
+            onOpenRecipe: (r) => _openRecipe(context, r),
+            onOpenImport: () => _openImport(context),
+          ),
+    );
+  }
+}
+
+// ─── Body (rebuilt when imports change) ──────────────────────────────────────
+
+class _RecipeListBody extends StatelessWidget {
+  const _RecipeListBody({
+    required this.importedRecipes,
+    required this.onOpenRecipe,
+    required this.onOpenImport,
+  });
+
+  final List<Recipe> importedRecipes;
+  final void Function(Recipe) onOpenRecipe;
+  final VoidCallback onOpenImport;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +83,7 @@ class RecipeListScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Page header ────────────────────────────────────────
+                    // ── Page header ──────────────────────────────────────
                     Semantics(
                       header: true,
                       child: Text(
@@ -62,16 +102,50 @@ class RecipeListScreen extends StatelessWidget {
                       ),
                     ),
 
-                    // ── Category sections ──────────────────────────────────
+                    // ── Import button ────────────────────────────────────
+                    const SizedBox(height: 20),
+                    Semantics(
+                      button: true,
+                      label: 'Import recipe from a website link',
+                      child: _ImportButton(onTap: onOpenImport),
+                    ),
+
+                    // ── Built-in category sections ───────────────────────
                     for (final category in kRecipeCategories) ...[
                       RecipeSectionHeader(title: category),
                       for (final recipe in kAllRecipes
                           .where((r) => r.category == category)) ...[
                         _RecipeCard(
                           recipe: recipe,
-                          onTap: () => _openRecipe(context, recipe),
+                          onTap: () => onOpenRecipe(recipe),
                         ),
                         const SizedBox(height: 14),
+                      ],
+                    ],
+
+                    // ── Imported recipes (session-only) ──────────────────
+                    if (importedRecipes.isNotEmpty) ...[
+                      // Group by category
+                      for (final category in [
+                        ...kRecipeCategories,
+                        kImportedCategory,
+                      ]) ...[
+                        if (importedRecipes.any((r) => r.category == category)) ...[
+                          RecipeSectionHeader(
+                            title: category == kImportedCategory
+                                ? kImportedCategory
+                                : '$category (Imported)',
+                          ),
+                          for (final recipe in importedRecipes
+                              .where((r) => r.category == category)) ...[
+                            _RecipeCard(
+                              recipe: recipe,
+                              onTap: () => onOpenRecipe(recipe),
+                              isImported: true,
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                        ],
                       ],
                     ],
                   ],
@@ -85,13 +159,64 @@ class RecipeListScreen extends StatelessWidget {
   }
 }
 
+// ─── _ImportButton ────────────────────────────────────────────────────────────
+
+class _ImportButton extends StatelessWidget {
+  const _ImportButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: kBrandPurpleLight.withValues(alpha: 0.5),
+              width: 1.5,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.link_rounded, color: kBrandPurpleLight, size: 20),
+                const SizedBox(width: 10),
+                Text(
+                  'Import Recipe from Link',
+                  style: TextStyle(
+                    color: kBrandPurpleLight,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─── _RecipeCard ──────────────────────────────────────────────────────────────
 
 class _RecipeCard extends StatelessWidget {
-  const _RecipeCard({required this.recipe, required this.onTap});
+  const _RecipeCard({
+    required this.recipe,
+    required this.onTap,
+    this.isImported = false,
+  });
 
   final Recipe recipe;
   final VoidCallback onTap;
+  final bool isImported;
 
   /// Full accessible description read by screen readers.
   String _semanticLabel() {
@@ -135,6 +260,26 @@ class _RecipeCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (isImported) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: kBrandPurpleMid.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'Imported',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: kBrandPurpleLight,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
                 const SizedBox(width: 8),
                 const Icon(
                   Icons.arrow_forward_ios_rounded,
