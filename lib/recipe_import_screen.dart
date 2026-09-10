@@ -409,7 +409,7 @@ class _PreviewCard extends StatelessWidget {
 Recipe? _parseSchemaOrgRecipe(String html, String sourceUrl) {
   // Find all <script type="application/ld+json"> blocks.
   final scriptRe = RegExp(
-    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    '<script[^>]+type=["\']application/ld\\+json["\'][^>]*>(.*?)</script>',
     dotAll: true,
     caseSensitive: false,
   );
