@@ -307,6 +307,28 @@ const List<Recipe> kAllRecipes = [
     difficulty: 3,
     dietaryPreferences: ['Vegetarian'],
     allergens: ['Wheat / Gluten', 'Dairy', 'Eggs'],
+    ingredients: [
+      RecipeIngredient('Butter', quantity: '1 cup (2 sticks)'),
+      RecipeIngredient('Granulated sugar', quantity: '3/4 cup'),
+      RecipeIngredient('Brown sugar', quantity: '3/4 cup, packed'),
+      RecipeIngredient('Eggs', quantity: '2 large'),
+      RecipeIngredient('Vanilla extract', quantity: '1 teaspoon'),
+      RecipeIngredient('All-purpose flour', quantity: '2 1/4 cups'),
+      RecipeIngredient('Baking soda', quantity: '1 teaspoon'),
+      RecipeIngredient('Salt', quantity: '1 teaspoon'),
+      RecipeIngredient('Semi-sweet chocolate chips', quantity: '2 cups'),
+    ],
+    tools: [
+      'Large mixing bowl',
+      'Measuring cups',
+      'Measuring spoons',
+      'Mixing spoon or electric mixer',
+      'Baking sheet',
+      'Tablespoon or cookie scoop',
+      'Spatula',
+      'Oven mitts',
+      'Plate',
+    ],
   ),
 
   Recipe(

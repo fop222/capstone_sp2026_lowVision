@@ -231,7 +231,9 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                     const SizedBox(height: 28),
 
                     // ── Instructions ────────────────────────────────────────
-                    _InstructionsSection(steps: recipe.steps),
+                    // Hidden until cooking steps have been provided.
+                    if (recipe.steps.isNotEmpty)
+                      _InstructionsSection(steps: recipe.steps),
 
                     const SizedBox(height: 36),
 
