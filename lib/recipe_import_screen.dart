@@ -186,13 +186,13 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                       const SizedBox(height: 20),
 
                       // ── Parse button ───────────────────────────────────
-                      SizedBox(
-                        width: double.infinity,
-                        child: GroceryGlowButton(
-                          label: 'Parse Recipe',
-                          onPressed: _loading ? null : _parse,
+                        SizedBox(
+                          width: double.infinity,
+                          child: GroceryGlowButton(
+                            onPressed: _loading ? null : _parse,
+                            child: const Text('Parse Recipe'),
+                          ),
                         ),
-                      ),
 
                       // ── Loading ────────────────────────────────────────
                       if (_loading) ...[
@@ -256,8 +256,8 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: GroceryGlowButton(
-                            label: 'Add to My Recipes',
                             onPressed: _confirm,
+                            child: const Text('Add to My Recipes'),
                           ),
                         ),
                         const SizedBox(height: 12),
