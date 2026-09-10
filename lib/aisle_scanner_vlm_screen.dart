@@ -880,6 +880,19 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     return _dedupeShelfLinesByProduct(stripped);
   }
 
+  /// Formats the open-ended pantry VLM response into a clean bullet list.
+  /// e.g. "Greek Yogurt\nMilk" → "• Greek Yogurt\n• Milk"
+  String _pantryDetectedDisplay(String vlmAnswer) {
+    final lines = vlmAnswer
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim().replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), ''))
+        .where((l) => l.isNotEmpty && l.toUpperCase() != 'NONE')
+        .toSet() // deduplicate
+        .toList();
+    if (lines.isEmpty) return '';
+    return lines.map((l) => '• $l').join('\n');
+  }
+
   String _shelfDisplayFromVlmAnswer(String vlmAnswer) {
     final cleanedRaw = _vlmAnswerWithoutFoundTags(vlmAnswer);
     final cleaned = _normalizeNoneItemCaption(
@@ -1470,10 +1483,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             ? 'Could not confirm $wanted in your pantry or fridge. Tap Scan Shelves to try again.'
             : 'Could not confirm $wanted on this shelf. Tap Scan Shelf to try again.';
       } else {
-        final deduped = _shelfDisplayFromVlmAnswer(vlmAnswer);
-        shelfUser = deduped.isEmpty
-            ? 'On this shelf: looks like a match for something on your list.'
-            : 'On this shelf: $deduped';
+        if (widget.pantryMode) {
+          final detected = _pantryDetectedDisplay(vlmAnswer);
+          final matchedNames = _englishNameList(foundTargets.map((e) => e.name).toList());
+          shelfUser = detected.isEmpty
+              ? 'Found in pantry: $matchedNames'
+              : 'Detected in pantry:\n$detected';
+        } else {
+          final deduped = _shelfDisplayFromVlmAnswer(vlmAnswer);
+          shelfUser = deduped.isEmpty
+              ? 'On this shelf: looks like a match for something on your list.'
+              : 'On this shelf: $deduped';
+        }
       }
     } else if (singleTarget != null) {
       final targetFound = foundTargets.isNotEmpty;
