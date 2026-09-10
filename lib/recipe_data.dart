@@ -164,6 +164,23 @@ const List<Recipe> kAllRecipes = [
     difficulty: 2,
     dietaryPreferences: ['Vegetarian'],
     allergens: ['Wheat / Gluten', 'Dairy'],
+    ingredients: [
+      RecipeIngredient("Campbell's Condensed Tomato Soup", quantity: '1 can'),
+      RecipeIngredient('Water', quantity: '1 1/2 cups'),
+      RecipeIngredient('Bread', quantity: '2 slices'),
+      RecipeIngredient('Butter', quantity: '1 tablespoon'),
+      RecipeIngredient('Cheese', quantity: '2 slices'),
+    ],
+    tools: [
+      'Medium saucepan',
+      'Medium frying pan',
+      'Measuring cup',
+      'Measuring spoon',
+      'Spatula',
+      'Stove',
+      'Plate',
+      'Bowl',
+    ],
   ),
 
   Recipe(
@@ -174,6 +191,22 @@ const List<Recipe> kAllRecipes = [
     difficulty: 2,
     dietaryPreferences: ['No Restrictions'],
     allergens: ['Wheat / Gluten'],
+    ingredients: [
+      RecipeIngredient('Frozen lean burger patty', quantity: '1'),
+      RecipeIngredient('Hamburger bun', quantity: '1'),
+      RecipeIngredient('Cooking oil', quantity: '1 teaspoon, if patty is lean'),
+      RecipeIngredient('Salt and pepper', quantity: 'to taste, if patty is unseasoned'),
+      RecipeIngredient('Cheese', quantity: '1 slice, optional'),
+      RecipeIngredient('Lettuce, tomato, onion, or pickles', quantity: 'optional toppings'),
+      RecipeIngredient('Ketchup, mustard, or mayo', quantity: 'as desired'),
+    ],
+    tools: [
+      'Heavy skillet or grill',
+      'Spatula',
+      'Plate',
+      'Knife and cutting board',
+      'Lid or foil',
+    ],
   ),
 
   Recipe(
@@ -184,6 +217,27 @@ const List<Recipe> kAllRecipes = [
     difficulty: 2,
     dietaryPreferences: ['Vegetarian'],
     allergens: ['Wheat / Gluten', 'Dairy'],
+    ingredients: [
+      RecipeIngredient('Pizza dough', quantity: '1 (16 ounces)'),
+      RecipeIngredient('Fresh mozzarella', quantity: '1/2 pound'),
+      RecipeIngredient('Fresh basil leaves', quantity: '1/2 cup'),
+      RecipeIngredient('Tomato paste', quantity: '1 can (6 ounces)'),
+      RecipeIngredient('Water', quantity: '1 1/2 cups'),
+      RecipeIngredient('Garlic', quantity: '4 cloves, chopped'),
+      RecipeIngredient('Olive oil', quantity: '1/4 cup'),
+      RecipeIngredient('Kosher salt', quantity: '1/4 teaspoon'),
+      RecipeIngredient('Black pepper', quantity: '1/4 teaspoon'),
+      RecipeIngredient('Sesame seeds', quantity: '1 teaspoon'),
+    ],
+    tools: [
+      'Baking sheet or pizza pan',
+      'Small mixing bowl',
+      'Whisk or fork',
+      'Measuring cups and spoons',
+      'Knife and cutting board',
+      'Rolling pin, optional',
+      'Oven mitts',
+    ],
   ),
 
   Recipe(
@@ -194,6 +248,18 @@ const List<Recipe> kAllRecipes = [
     difficulty: 3,
     dietaryPreferences: ['Vegetarian', 'Dairy-Free'],
     allergens: ['Eggs', 'Soy'],
+    ingredients: [
+      RecipeIngredient('Cold cooked rice', quantity: '3 cups'),
+      RecipeIngredient('Frozen peas and carrots', quantity: '1 cup'),
+      RecipeIngredient('Cooking oil', quantity: '2 tablespoons'),
+      RecipeIngredient('Eggs', quantity: '2'),
+      RecipeIngredient('Soy sauce', quantity: '1 to 2 tablespoons'),
+    ],
+    tools: [
+      'Large skillet or wok',
+      'Spatula or wooden spoon',
+      'Measuring cups and spoons',
+    ],
   ),
 
   Recipe(
@@ -204,6 +270,31 @@ const List<Recipe> kAllRecipes = [
     difficulty: 3,
     dietaryPreferences: ['No Restrictions'],
     allergens: ['Wheat / Gluten', 'Dairy'],
+    ingredients: [
+      RecipeIngredient('Dry spaghetti', quantity: '3/4 cup'),
+      RecipeIngredient('Lean ground meat', quantity: '1/3 cup'),
+      RecipeIngredient('Olive oil', quantity: '1/2 tablespoon'),
+      RecipeIngredient('Chopped onion', quantity: '2 tablespoons plus 1 teaspoon'),
+      RecipeIngredient('Minced garlic', quantity: '1/2 teaspoon'),
+      RecipeIngredient('Tomato paste', quantity: '1 tablespoon'),
+      RecipeIngredient('Dried oregano', quantity: '1/4 teaspoon'),
+      RecipeIngredient('Crushed red pepper flakes', quantity: 'tiny pinch'),
+      RecipeIngredient('Water, broth, or red wine', quantity: '2 1/2 tablespoons'),
+      RecipeIngredient('Crushed tomatoes', quantity: '2/3 cup'),
+      RecipeIngredient('Salt', quantity: '1/4 teaspoon'),
+      RecipeIngredient('Black pepper', quantity: 'to taste'),
+      RecipeIngredient('Fresh basil leaves', quantity: '2 small leaves, torn'),
+      RecipeIngredient('Parmesan cheese', quantity: 'for serving'),
+    ],
+    tools: [
+      'Small pot',
+      'Colander',
+      'Small skillet',
+      'Cutting board and knife',
+      'Measuring cups and spoons',
+      'Wooden spoon',
+      'Grater',
+    ],
   ),
 
   // ── DESSERTS ─────────────────────────────────────────────────────────────
