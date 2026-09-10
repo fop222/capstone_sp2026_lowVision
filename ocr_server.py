@@ -13,6 +13,7 @@ from typing import List
 
 import easyocr
 import numpy as np
+import requests as req
 from flask import Flask, jsonify, request
 from PIL import Image
 
@@ -23,7 +24,7 @@ app = Flask(__name__)
 def cors_headers(response):
     """Allow Flutter web (Chrome) to call this server."""
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
 
@@ -41,6 +42,34 @@ reader = easyocr.Reader(["en"], gpu=_use_gpu)
 @app.route("/extract-text", methods=["OPTIONS"])
 def extract_text_options():
     return "", 204
+
+
+# ── Recipe-page fetch ─────────────────────────────────────────────────────────
+# Fetches the HTML of an external recipe URL server-side (no CORS restrictions)
+# and returns it as JSON.  Called by the Flutter "Import Recipe from Link" flow.
+
+@app.route("/fetch-recipe", methods=["GET", "OPTIONS"])
+def fetch_recipe():
+    if request.method == "OPTIONS":
+        return "", 204
+    url = request.args.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "Missing 'url' query parameter"}), 400
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        resp = req.get(url, headers=headers, timeout=15, allow_redirects=True)
+        return jsonify({"html": resp.text, "status": resp.status_code})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
 
 
 @app.post("/extract-text")

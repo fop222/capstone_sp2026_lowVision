@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 
 import 'grocery_ui.dart';
 import 'imported_recipes_state.dart';
+import 'ocr_config.dart';
 import 'recipe_data.dart';
 
 // ─── Public entry-point ───────────────────────────────────────────────────────
@@ -77,39 +78,21 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
     }
   }
 
-  /// Tries multiple CORS proxies in order, returning raw HTML on first success.
+  /// Fetches the HTML of [url] via the app's own Flask backend,
+  /// which has no CORS restrictions.
   Future<String> _fetchWithFallback(String url) async {
-    final encoded = Uri.encodeComponent(url);
-
-    // 1. corsproxy.io — returns raw HTML directly.
-    try {
-      final r = await http
-          .get(Uri.parse('https://corsproxy.io/?url=$encoded'))
-          .timeout(const Duration(seconds: 18));
-      if (r.statusCode == 200 && r.body.isNotEmpty) return r.body;
-    } catch (_) {}
-
-    // 2. allorigins.win — wraps HTML in JSON { "contents": "..." }.
-    try {
-      final r = await http
-          .get(Uri.parse('https://api.allorigins.win/get?url=$encoded'))
-          .timeout(const Duration(seconds: 18));
-      if (r.statusCode == 200) {
-        final decoded = jsonDecode(r.body) as Map<String, dynamic>;
-        final contents = decoded['contents'] as String? ?? '';
-        if (contents.isNotEmpty) return contents;
-      }
-    } catch (_) {}
-
-    // 3. corsproxy.io raw endpoint.
-    try {
-      final r = await http
-          .get(Uri.parse('https://corsproxy.io/?$url'))
-          .timeout(const Duration(seconds: 18));
-      if (r.statusCode == 200 && r.body.isNotEmpty) return r.body;
-    } catch (_) {}
-
-    throw Exception('All proxies failed. Check your internet connection.');
+    final uri = recipeFetchUri(url);
+    final resp = await http.get(uri).timeout(const Duration(seconds: 25));
+    if (resp.statusCode != 200) {
+      throw Exception('Backend returned ${resp.statusCode}');
+    }
+    final body = jsonDecode(resp.body) as Map<String, dynamic>;
+    if (body.containsKey('error')) {
+      throw Exception(body['error']);
+    }
+    final html = body['html'] as String? ?? '';
+    if (html.isEmpty) throw Exception('Empty response from server');
+    return html;
   }
 
   void _confirm() {

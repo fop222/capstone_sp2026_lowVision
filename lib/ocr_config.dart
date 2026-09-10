@@ -99,3 +99,21 @@ Uri yoloDetectUri() {
   }
   return Uri.parse('$base/detect-yolo');
 }
+
+/// URI for server-side recipe HTML fetch (GET ?url=<encoded>).
+/// Avoids browser CORS restrictions by fetching through the Flask backend.
+Uri recipeFetchUri(String recipeUrl) {
+  final base = ocrServiceBaseUrl();
+  if (kIsWeb && base.endsWith('/api/ocr')) {
+    // Vercel proxy: /api/ocr?path=/fetch-recipe&url=<encoded>
+    // api/ocr.js reads ?path= to route to Flask; Flask reads ?url= from the
+    // forwarded URL.  We embed url in the path so it survives proxying.
+    final encodedUrl = Uri.encodeQueryComponent(recipeUrl);
+    final origin = '${Uri.base.scheme}://${Uri.base.host}'
+        '${Uri.base.hasPort ? ':${Uri.base.port}' : ''}';
+    return Uri.parse(
+        '$origin/api/ocr?path=/fetch-recipe&url=$encodedUrl');
+  }
+  return Uri.parse('$base/fetch-recipe')
+      .replace(queryParameters: {'url': recipeUrl});
+}

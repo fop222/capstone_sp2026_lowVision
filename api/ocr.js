@@ -25,7 +25,16 @@ export default {
       let path = incoming.searchParams.get("path") || "/extract-text";
       if (!path.startsWith("/")) path = `/${path}`;
 
+      // Forward any extra query params (e.g. ?url= for /fetch-recipe).
+      const extraParams = new URLSearchParams();
+      for (const [k, v] of incoming.searchParams.entries()) {
+        if (k !== "path") extraParams.append(k, v);
+      }
+
       const targetUrl = new URL(path, `${targetBase}/`);
+      for (const [k, v] of extraParams.entries()) {
+        targetUrl.searchParams.append(k, v);
+      }
       targetUrlString = targetUrl.toString();
 
       const method = request.method;
