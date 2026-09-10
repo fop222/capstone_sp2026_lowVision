@@ -52,19 +52,7 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
     });
 
     try {
-      // CORS proxy — required for Flutter web to fetch third-party pages.
-      final proxyUrl =
-          'https://api.allorigins.win/get?url=${Uri.encodeComponent(url)}';
-      final resp = await http.get(Uri.parse(proxyUrl)).timeout(
-        const Duration(seconds: 20),
-      );
-
-      if (resp.statusCode != 200) {
-        throw Exception('Server returned ${resp.statusCode}');
-      }
-
-      final body = jsonDecode(resp.body) as Map<String, dynamic>;
-      final html = body['contents'] as String? ?? '';
+      final html = await _fetchWithFallback(url);
 
       final recipe = _parseSchemaOrgRecipe(html, url);
       if (recipe == null) {
@@ -83,10 +71,45 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = 'Could not load the page: $e';
+        _error = 'Could not load the page. Please check the URL and try again.';
         _loading = false;
       });
     }
+  }
+
+  /// Tries multiple CORS proxies in order, returning raw HTML on first success.
+  Future<String> _fetchWithFallback(String url) async {
+    final encoded = Uri.encodeComponent(url);
+
+    // 1. corsproxy.io — returns raw HTML directly.
+    try {
+      final r = await http
+          .get(Uri.parse('https://corsproxy.io/?url=$encoded'))
+          .timeout(const Duration(seconds: 18));
+      if (r.statusCode == 200 && r.body.isNotEmpty) return r.body;
+    } catch (_) {}
+
+    // 2. allorigins.win — wraps HTML in JSON { "contents": "..." }.
+    try {
+      final r = await http
+          .get(Uri.parse('https://api.allorigins.win/get?url=$encoded'))
+          .timeout(const Duration(seconds: 18));
+      if (r.statusCode == 200) {
+        final decoded = jsonDecode(r.body) as Map<String, dynamic>;
+        final contents = decoded['contents'] as String? ?? '';
+        if (contents.isNotEmpty) return contents;
+      }
+    } catch (_) {}
+
+    // 3. corsproxy.io raw endpoint.
+    try {
+      final r = await http
+          .get(Uri.parse('https://corsproxy.io/?$url'))
+          .timeout(const Duration(seconds: 18));
+      if (r.statusCode == 200 && r.body.isNotEmpty) return r.body;
+    } catch (_) {}
+
+    throw Exception('All proxies failed. Check your internet connection.');
   }
 
   void _confirm() {
