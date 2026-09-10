@@ -476,7 +476,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _speak(
         widget.pantryMode
-            ? 'Point your camera at the shelves in your pantry or refrigerator. When the items are visible, select Scan Shelves.'
+            ? 'Point your camera at the shelves in your pantry or refrigerator. Open the drawers to check for fruits and vegetables. When the items are visible, select Scan Shelves.'
             : 'Grocery shopping mode started for ${widget.listTitle}. Point your camera at the aisle sign and tap Scan Aisle Sign.',
       );
     });
