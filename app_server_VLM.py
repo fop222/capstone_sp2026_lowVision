@@ -5,6 +5,7 @@ import os
 import io
 import easyocr
 import numpy as np
+import requests as req
 import torch
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -372,6 +373,33 @@ def detect_yolo():
 if __name__ == "__main__":
     # Turning off the reloader makes logs easier to read.
     app.run(host="0.0.0.0", port=5010, debug=True, use_reloader=False)
+
+
+# ── Recipe-page fetch ─────────────────────────────────────────────────────────
+# Fetches the HTML of an external recipe URL server-side (no CORS restrictions)
+# and returns it as JSON.  Called by the Flutter "Import Recipe from Link" flow.
+
+@app.route("/fetch-recipe", methods=["GET", "OPTIONS"])
+def fetch_recipe():
+    if request.method == "OPTIONS":
+        return "", 204
+    url = request.args.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "Missing 'url' query parameter"}), 400
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        resp = req.get(url, headers=headers, timeout=15, allow_redirects=True)
+        return jsonify({"html": resp.text, "status": resp.status_code})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
 
 
 @app.route("/ping-post", methods=["POST"])
