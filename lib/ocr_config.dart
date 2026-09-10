@@ -105,9 +105,6 @@ Uri yoloDetectUri() {
 Uri recipeFetchUri(String recipeUrl) {
   final base = ocrServiceBaseUrl();
   if (kIsWeb && base.endsWith('/api/ocr')) {
-    // Vercel proxy: /api/ocr?path=/fetch-recipe&url=<encoded>
-    // api/ocr.js reads ?path= to route to Flask; Flask reads ?url= from the
-    // forwarded URL.  We embed url in the path so it survives proxying.
     final encodedUrl = Uri.encodeQueryComponent(recipeUrl);
     final origin = '${Uri.base.scheme}://${Uri.base.host}'
         '${Uri.base.hasPort ? ':${Uri.base.port}' : ''}';
@@ -116,4 +113,15 @@ Uri recipeFetchUri(String recipeUrl) {
   }
   return Uri.parse('$base/fetch-recipe')
       .replace(queryParameters: {'url': recipeUrl});
+}
+
+/// URI for extracting kitchen tools from recipe instruction text (POST JSON).
+Uri toolsExtractUri() {
+  final base = ocrServiceBaseUrl();
+  if (kIsWeb && base.endsWith('/api/ocr')) {
+    final origin = '${Uri.base.scheme}://${Uri.base.host}'
+        '${Uri.base.hasPort ? ':${Uri.base.port}' : ''}';
+    return Uri.parse('$origin/api/ocr?path=/extract-tools');
+  }
+  return Uri.parse('$base/extract-tools');
 }

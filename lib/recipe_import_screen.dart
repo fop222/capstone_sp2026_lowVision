@@ -31,6 +31,7 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
   final _formKey = GlobalKey<FormState>();
 
   bool _loading = false;
+  String _loadingMessage = 'Fetching recipe…';
   String? _error;
   Recipe? _preview;
 
@@ -48,6 +49,7 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
 
     setState(() {
       _loading = true;
+      _loadingMessage = 'Fetching recipe…';
       _error = null;
       _preview = null;
     });
@@ -66,8 +68,31 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
         return;
       }
 
+      // Extract tools from steps using the VLM server.
+      List<String> tools = [];
+      if (recipe.steps.isNotEmpty) {
+        setState(() => _loadingMessage = 'Extracting tools…');
+        tools = await _extractTools(recipe.steps);
+      }
+
+      // Rebuild the recipe with the extracted tools.
+      final recipeWithTools = Recipe(
+        id: recipe.id,
+        name: recipe.name,
+        category: recipe.category,
+        estimatedTimeMinutes: recipe.estimatedTimeMinutes,
+        difficulty: recipe.difficulty,
+        dietaryPreferences: recipe.dietaryPreferences,
+        allergens: recipe.allergens,
+        ingredients: recipe.ingredients,
+        tools: tools,
+        steps: recipe.steps,
+        servings: recipe.servings,
+        isImported: true,
+      );
+
       setState(() {
-        _preview = recipe;
+        _preview = recipeWithTools;
         _loading = false;
       });
     } catch (e) {
@@ -93,6 +118,35 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
     final html = body['html'] as String? ?? '';
     if (html.isEmpty) throw Exception('Empty response from server');
     return html;
+  }
+
+  /// Calls /extract-tools on the backend VLM to get a list of kitchen tools
+  /// inferred from the recipe's step text.  Returns [] on any failure so that
+  /// the import flow is never blocked by a tool-extraction error.
+  Future<List<String>> _extractTools(List<String> steps) async {
+    try {
+      final stepsText = steps.join('\n');
+      final uri = toolsExtractUri();
+      final resp = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'steps': stepsText}),
+          )
+          .timeout(const Duration(seconds: 40));
+      if (resp.statusCode != 200) return [];
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      final raw = body['tools'];
+      if (raw is List) {
+        return raw
+            .map((e) => (e as String).trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {
+      // Tool extraction is best-effort; never block the import.
+    }
+    return [];
   }
 
   void _confirm() {
@@ -211,7 +265,7 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                               ),
                               SizedBox(height: 12),
                               Text(
-                                'Fetching recipe…',
+                                _loadingMessage,
                                 style: TextStyle(
                                   color: Colors.white70,
                                   fontSize: 15,

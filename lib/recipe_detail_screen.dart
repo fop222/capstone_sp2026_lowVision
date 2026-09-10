@@ -250,8 +250,9 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                       ingredients: recipe.ingredients,
                     ),
 
-                    // ── Tools (hidden for imported recipes) ─────────────
-                    if (!recipe.isImported) ...[
+                    // ── Tools (shown when populated; hidden for imported only
+                    //          if tools list is empty) ────────────────────────
+                    if (recipe.tools.isNotEmpty) ...[
                       const SizedBox(height: 28),
                       _ContentSection(
                         title: 'Tools',
@@ -259,7 +260,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                       ),
                     ],
 
-                    // ── Instructions (hidden for imported + unpopulated) ──
+                    // ── Instructions (hidden for imported recipes) ───────────
                     if (!recipe.isImported && recipe.steps.isNotEmpty) ...[
                       const SizedBox(height: 28),
                       _InstructionsSection(steps: recipe.steps),

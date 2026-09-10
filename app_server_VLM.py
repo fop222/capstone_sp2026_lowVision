@@ -179,6 +179,59 @@ def infer_with_vlm(image_path: Path, question: str) -> str:
     return (output_text[0] if output_text else "").strip()
 
 
+def infer_text_only(question: str, max_tokens: int = 256) -> str:
+    """Run the VLM in text-only mode (no image).  Used for tool extraction."""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": question},
+            ],
+        }
+    ]
+
+    inputs = vlm_processor.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=True,
+        return_tensors="pt",
+    )
+    inputs = {
+        k: v.to(vlm_model.device) if hasattr(v, "to") else v
+        for k, v in inputs.items()
+    }
+
+    lock = _vlm_lock if SERIALIZE_VLM else None
+    if lock:
+        lock.acquire()
+    try:
+        with torch.inference_mode():
+            if torch.cuda.is_available():
+                with torch.autocast("cuda", dtype=torch.float16):
+                    generated_ids = vlm_model.generate(
+                        **inputs, max_new_tokens=max_tokens, do_sample=False
+                    )
+            else:
+                generated_ids = vlm_model.generate(
+                    **inputs, max_new_tokens=max_tokens, do_sample=False
+                )
+    finally:
+        if lock:
+            lock.release()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    trimmed = [
+        out[len(inp):]
+        for inp, out in zip(inputs["input_ids"], generated_ids)
+    ]
+    result = vlm_processor.batch_decode(
+        trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+    )
+    return (result[0] if result else "").strip()
+
+
 def infer_with_yolo(image_path: Path):
     """
     Returns list of detections in app-compatible format:
@@ -373,6 +426,48 @@ def detect_yolo():
 if __name__ == "__main__":
     # Turning off the reloader makes logs easier to read.
     app.run(host="0.0.0.0", port=5010, debug=True, use_reloader=False)
+
+
+# ── Tool extraction from recipe steps ────────────────────────────────────────
+# Accepts a JSON body {"steps": "...full instructions text..."} and uses the
+# VLM in text-only mode to extract a concise list of required kitchen tools.
+
+@app.route("/extract-tools", methods=["POST", "OPTIONS"])
+def extract_tools():
+    if request.method == "OPTIONS":
+        return "", 204
+
+    data = request.get_json(silent=True) or {}
+    steps_text = (data.get("steps") or "").strip()
+    if not steps_text:
+        return jsonify({"tools": []})
+
+    prompt = (
+        "You are a cooking assistant. Read the recipe instructions below and "
+        "list ONLY the physical kitchen tools and equipment actually required "
+        "to make this recipe. Do not include ingredients or measurements. "
+        "Output one tool per line, nothing else — no numbers, no dashes, no "
+        "explanations. If a tool is not clearly needed, leave it out.\n\n"
+        f"Recipe instructions:\n{steps_text[:3000]}"
+    )
+
+    try:
+        raw = infer_text_only(prompt, max_tokens=200)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        print(f"\n=== /extract-tools ERROR ===\n{tb}\n")
+        return _json_error(500, str(exc), tb)
+
+    # Parse the response: split on newlines, strip bullets/dashes/numbers.
+    tools = []
+    for line in raw.splitlines():
+        line = line.strip()
+        # Remove leading "- ", "• ", "1. ", etc.
+        line = __import__('re').sub(r'^[\-\*\•\d]+[\.\)]\s*', '', line).strip()
+        if line and len(line) < 120:   # sanity check — skip run-on lines
+            tools.append(line)
+
+    return jsonify({"tools": tools})
 
 
 # ── Recipe-page fetch ─────────────────────────────────────────────────────────
