@@ -226,6 +226,23 @@ const List<Recipe> kAllRecipes = [
     difficulty: 2,
     dietaryPreferences: ['Vegetarian', 'Dairy-Free'],
     allergens: ['Eggs'],
+    ingredients: [
+      RecipeIngredient('Brownie mix', quantity: '1 box'),
+      RecipeIngredient('Water', quantity: '3 tablespoons'),
+      RecipeIngredient('Vegetable oil', quantity: '1/2 cup'),
+      RecipeIngredient('Eggs', quantity: '2'),
+    ],
+    tools: [
+      'Large mixing bowl',
+      'Measuring spoons',
+      'Measuring cup',
+      '13-by-9-inch baking pan',
+      'Oven',
+      'Oven mitts',
+      'Toothpick',
+      'Heat-safe surface',
+      'Knife',
+    ],
   ),
 ];
 
