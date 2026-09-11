@@ -404,7 +404,10 @@ class _IngredientItem extends StatelessWidget {
               // Ingredient name
               Expanded(
                 child: Text(
-                  ingredient.name,
+                  ingredient.name.isEmpty
+                      ? ''
+                      : ingredient.name[0].toUpperCase() +
+                          ingredient.name.substring(1),
                   style: theme.textTheme.bodyLarge?.copyWith(
                     color: Colors.white70,
                   ),
