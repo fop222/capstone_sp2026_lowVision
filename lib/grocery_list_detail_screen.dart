@@ -15,6 +15,9 @@ import 'shopping_voice_host.dart';
 
 enum _ListShopTab { getIt, gotIt }
 
+/// Capitalizes the first letter of [s] without altering the rest.
+String _capFirst(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
 /// Displays items in a grocery list and allows adding / toggling / deleting
 /// them. Items can be added manually (typed) or via a guided voice flow where
 /// TTS asks for the name and section and STT captures the answers.
@@ -717,7 +720,7 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                             _toggleItem(item['id'] as String, checked),
                       ),
                       title: Text(
-                        _cap(item['name'] as String? ?? ''),
+                        _capFirst(item['name'] as String? ?? ''),
                         style: TextStyle(
                           fontSize: 22,
                           decoration: checked
@@ -1222,9 +1225,6 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
     setState(() => _step = _VoiceStep.done);
     Navigator.pop(context);
   }
-
-  String _cap(String s) =>
-      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   String _capitalize(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
