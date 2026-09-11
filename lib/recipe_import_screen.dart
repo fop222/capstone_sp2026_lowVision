@@ -121,11 +121,13 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
   }
 
   /// Calls /extract-tools on the backend VLM to get a list of kitchen tools
-  /// inferred from the recipe's step text.  Returns [] on any failure so that
-  /// the import flow is never blocked by a tool-extraction error.
+  /// inferred from the recipe's step text.  Falls back to rule-based extraction
+  /// if the server is unavailable or returns an empty list.
   Future<List<String>> _extractTools(List<String> steps) async {
+    final stepsText = steps.join('\n');
+
+    // Try VLM server first.
     try {
-      final stepsText = steps.join('\n');
       final uri = toolsExtractUri();
       final resp = await http
           .post(
@@ -134,19 +136,23 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
             body: jsonEncode({'steps': stepsText}),
           )
           .timeout(const Duration(seconds: 40));
-      if (resp.statusCode != 200) return [];
-      final body = jsonDecode(resp.body) as Map<String, dynamic>;
-      final raw = body['tools'];
-      if (raw is List) {
-        return raw
-            .map((e) => (e as String).trim())
-            .where((s) => s.isNotEmpty)
-            .toList();
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body) as Map<String, dynamic>;
+        final raw = body['tools'];
+        if (raw is List) {
+          final vlmTools = raw
+              .map((e) => (e as String).trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+          if (vlmTools.isNotEmpty) return vlmTools;
+        }
       }
     } catch (_) {
-      // Tool extraction is best-effort; never block the import.
+      // VLM unavailable — fall through to rule-based.
     }
-    return [];
+
+    // Rule-based fallback: scan steps text for known kitchen tool keywords.
+    return _inferToolsFromText(stepsText);
   }
 
   void _confirm() {
@@ -513,7 +519,8 @@ Recipe? _parseSchemaOrgRecipe(String html, String sourceUrl) {
 
 Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
   // ── Name ──────────────────────────────────────────────────────────────
-  final name = _str(s['name']) ?? _str(s['headline']) ?? 'Imported Recipe';
+  final name = _decodeHtmlEntities(
+      _str(s['name']) ?? _str(s['headline']) ?? 'Imported Recipe');
 
   // ── Time ──────────────────────────────────────────────────────────────
   int minutes = _parseDuration(s['totalTime']);
@@ -529,7 +536,7 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
   final ingredients = <RecipeIngredient>[];
   if (rawIngredients is List) {
     for (final item in rawIngredients) {
-      final text = _str(item)?.trim() ?? '';
+      final text = _decodeHtmlEntities(_str(item)?.trim() ?? '');
       if (text.isEmpty) continue;
       final parts = _splitQuantityName(text);
       final cleanedName = _cleanIngredientName(parts.$2);
@@ -604,25 +611,101 @@ int _parseDuration(dynamic v) {
   return h * 60 + min;
 }
 
+/// Decodes common HTML entities: &#39; → ', &amp; → &, etc.
+String _decodeHtmlEntities(String s) {
+  return s
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#34;', '"')
+      .replaceAll('&apos;', "'")
+      .replaceAll('&#39;', "'")
+      .replaceAll('&nbsp;', ' ')
+      .replaceAllMapped(RegExp(r'&#(\d+);'), (m) {
+        final code = int.tryParse(m.group(1)!) ?? 0;
+        return code > 0 ? String.fromCharCode(code) : '';
+      });
+}
+
 /// Very light quantity/name splitter: "2 cups all-purpose flour" →
 /// ("2 cups", "all-purpose flour").  Falls back to ("", full text).
 (String, String) _splitQuantityName(String text) {
-  // Pattern: optional number + optional fraction, then a unit word, then rest.
+  // Decode HTML entities first.
+  final t = _decodeHtmlEntities(text);
+  // Number pattern: digits, decimals, fractions, vulgar fractions.
+  const num = r'[\d\.\/\s¼½¾⅓⅔⅛⅜⅝⅞]+';
+  // Units (singular + plural).
+  const units =
+      r'cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|'
+      r'oz|ounce|ounces|pound|pounds|lb|lbs|gram|grams|g|kg|ml|'
+      r'liter|liters|l|can|cans|bunch|bunches|clove|cloves|'
+      r'slice|slices|piece|pieces|package|packages|pkg|'
+      r'bag|bags|box|boxes|stick|sticks|bar|bars|'
+      r'sprig|sprigs|sheet|sheets|strip|strips|'
+      r'to taste|as needed|pinch';
   final re = RegExp(
-    r'^(\d[\d/\s¼½¾]*(?:cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|oz|ounce|ounces|pound|pounds|lb|lbs|gram|grams|g|kg|ml|liter|liters|l|can|cans|bunch|clove|cloves|slice|slices|piece|pieces|package|packages|pkg|bag|bags|box|boxes|stick|sticks|to taste|as needed|pinch)\b)\s*(.*)',
+    '^($num(?:$units)\\b)\\s*(.*)',
     caseSensitive: false,
   );
-  final m = re.firstMatch(text);
+  final m = re.firstMatch(t);
   if (m != null) {
     return (m.group(1)!.trim(), m.group(2)!.trim());
   }
-  // Fallback: leading number only (e.g. "2 eggs")
-  final numRe = RegExp(r'^(\d[\d/\s¼½¾]*)\s+(.+)');
-  final nm = numRe.firstMatch(text);
+  // Fallback: leading number only (e.g. "2 eggs").
+  final numRe = RegExp(r'^([\d\.\/\s¼½¾⅓⅔⅛⅜⅝⅞]+)\s+(.+)');
+  final nm = numRe.firstMatch(t);
   if (nm != null) {
     return (nm.group(1)!.trim(), nm.group(2)!.trim());
   }
-  return ('', text);
+  return ('', t);
+}
+
+/// Rule-based kitchen tool extraction — scans recipe steps for tool keywords.
+/// Used as a fallback when the VLM server is unavailable.
+List<String> _inferToolsFromText(String stepsText) {
+  if (stepsText.isEmpty) return [];
+  final s = stepsText.toLowerCase();
+
+  final found = <String>[];
+  void check(Pattern pattern, String toolName) {
+    if (pattern is RegExp ? pattern.hasMatch(s) : s.contains(pattern as String)) {
+      found.add(toolName);
+    }
+  }
+
+  check(RegExp(r'\boven\b|preheat'), 'Oven');
+  check(RegExp(r'baking sheet|sheet pan|cookie sheet'), 'Baking sheet');
+  check(RegExp(r'baking dish|baking pan|casserole dish|9x13|9-by-13|13.by.9'), 'Baking dish');
+  check(RegExp(r'\bskillet\b|frying pan|sauté pan|saute pan'), 'Skillet or frying pan');
+  check(RegExp(r'\bsaucepan\b|small pot|medium pot'), 'Saucepan');
+  check(RegExp(r'large pot|stock pot|dutch oven'), 'Large pot');
+  check(RegExp(r'mixing bowl|large bowl|medium bowl|small bowl'), 'Mixing bowl');
+  check(RegExp(r'\bblender\b'), 'Blender');
+  check(RegExp(r'food processor'), 'Food processor');
+  check(RegExp(r'\bknife\b|cutting board|chopping board'), 'Knife and cutting board');
+  check(RegExp(r'\bspatula\b'), 'Spatula');
+  check(RegExp(r'\bwhisk\b'), 'Whisk');
+  check(RegExp(r'wooden spoon|mixing spoon|stirring spoon'), 'Wooden spoon');
+  check(RegExp(r'measuring cup'), 'Measuring cups');
+  check(RegExp(r'measuring spoon|tablespoon measure|teaspoon measure'), 'Measuring spoons');
+  check(RegExp(r'\bcolander\b|\bstrainer\b'), 'Colander');
+  check(RegExp(r'\bgrater\b'), 'Grater');
+  check(RegExp(r'rolling pin'), 'Rolling pin');
+  check(RegExp(r'meat mallet|tenderizer|pound.*flat|flatten.*pound'), 'Meat mallet');
+  check(RegExp(r'plastic wrap|cling wrap'), 'Plastic wrap');
+  check(RegExp(r'aluminum foil|tin foil'), 'Aluminum foil');
+  check(RegExp(r'\btoothpick'), 'Toothpicks');
+  check(RegExp(r'electric mixer|hand mixer|stand mixer'), 'Electric mixer');
+  check(RegExp(r'oven mitt|oven glove'), 'Oven mitts');
+  check(RegExp(r'shallow dish|shallow bowl|shallow pan'), 'Shallow dish');
+  check(RegExp(r'\btongs\b'), 'Tongs');
+  check(RegExp(r'\bpeeler\b'), 'Vegetable peeler');
+  check(RegExp(r'can opener'), 'Can opener');
+  check(RegExp(r'parchment paper|wax paper'), 'Parchment paper');
+  check(RegExp(r'wire rack|cooling rack'), 'Wire rack');
+
+  return found;
 }
 
 String _detectCategory(Map<dynamic, dynamic> s, String name) {
