@@ -474,11 +474,29 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     _initCamera();
     _loadMenuOrder();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _speak(
-        widget.pantryMode
-            ? 'Point your camera at the shelves in your pantry or refrigerator. Open the drawers to check for fruits and vegetables. When the items are visible, select Scan Shelves.'
-            : 'Grocery shopping mode started for ${widget.listTitle}. Point your camera at the aisle sign and tap Scan Aisle Sign.',
-      );
+      if (widget.pantryMode) {
+        // Build the ingredient list for the one-time intro announcement.
+        final names = _items.map((i) => i.name).toList();
+        String itemsText;
+        if (names.isEmpty) {
+          itemsText = '';
+        } else if (names.length == 1) {
+          itemsText = ' I will be looking for ${names[0]}.';
+        } else {
+          final allButLast = names.sublist(0, names.length - 1).join(', ');
+          itemsText = ' I will be looking for $allButLast, and ${names.last}.';
+        }
+        await _speak(
+          'Point your camera at the shelves in your pantry or refrigerator.'
+          ' Open the drawers to check for fruits and vegetables.'
+          '$itemsText'
+          ' When the items are visible, select Scan Shelves.',
+        );
+      } else {
+        await _speak(
+          'Grocery shopping mode started for ${widget.listTitle}. Point your camera at the aisle sign and tap Scan Aisle Sign.',
+        );
+      }
     });
   }
 

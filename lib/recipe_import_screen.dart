@@ -143,6 +143,7 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
           final vlmTools = raw
               .map((e) => (e as String).trim())
               .where((s) => s.isNotEmpty)
+              .map((s) => s[0].toUpperCase() + s.substring(1))
               .toList();
           if (vlmTools.isNotEmpty) return vlmTools;
         }

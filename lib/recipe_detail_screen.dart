@@ -416,7 +416,7 @@ class _IngredientItem extends StatelessWidget {
                 Text(
                   ingredient.quantity,
                   style: theme.textTheme.bodyLarge?.copyWith(
-                    color: kBrandPurpleLight,
+                    color: Colors.white,
                     fontWeight: FontWeight.w600,
                   ),
                   textAlign: TextAlign.right,
