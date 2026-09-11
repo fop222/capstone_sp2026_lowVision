@@ -717,7 +717,7 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                             _toggleItem(item['id'] as String, checked),
                       ),
                       title: Text(
-                        item['name'] as String? ?? '',
+                        _cap(item['name'] as String? ?? ''),
                         style: TextStyle(
                           fontSize: 22,
                           decoration: checked
@@ -738,7 +738,7 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                               'How many',
                               style: TextStyle(
                                 fontSize: 17,
-                                color: Colors.white.withValues(alpha: 0.55),
+                                color: Colors.white,
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -1222,6 +1222,9 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
     setState(() => _step = _VoiceStep.done);
     Navigator.pop(context);
   }
+
+  String _cap(String s) =>
+      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   String _capitalize(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
