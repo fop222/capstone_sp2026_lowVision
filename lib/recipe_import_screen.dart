@@ -263,13 +263,13 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                       // ── Loading ────────────────────────────────────────
                       if (_loading) ...[
                         const SizedBox(height: 28),
-                        const Center(
+                        Center(
                           child: Column(
                             children: [
-                              CircularProgressIndicator(
+                              const CircularProgressIndicator(
                                 color: kBrandPurpleLight,
                               ),
-                              SizedBox(height: 12),
+                              const SizedBox(height: 12),
                               Text(
                                 _loadingMessage,
                                 style: TextStyle(
