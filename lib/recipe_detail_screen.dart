@@ -261,7 +261,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                     ],
 
                     // ── Instructions (hidden for imported recipes) ───────────
-                    if (!recipe.isImported && recipe.steps.isNotEmpty) ...[
+                    if (!recipe.isImported && !recipe.isRecommended && recipe.steps.isNotEmpty) ...[
                       const SizedBox(height: 28),
                       _InstructionsSection(steps: recipe.steps),
                     ],

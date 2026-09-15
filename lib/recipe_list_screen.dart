@@ -6,6 +6,8 @@ import 'recipe_data.dart';
 import 'recipe_detail_screen.dart';
 import 'recipe_import_screen.dart';
 import 'recipe_widgets.dart';
+import 'surprise_me_scan_screen.dart';
+import 'surprise_me_state.dart';
 
 /// One vertically scrollable page showing all 10 recipes organised into
 /// three clearly separated sections: Breakfast → Entrées → Desserts.
@@ -24,6 +26,14 @@ class RecipeListScreen extends StatelessWidget {
     );
   }
 
+  void _openSurpriseMe(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const SurpriseMeScanScreen(),
+      ),
+    );
+  }
+
   void _openImport(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -34,15 +44,20 @@ class RecipeListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild whenever imported recipes change.
+    // Rebuild whenever imported OR recommended recipes change.
     return ValueListenableBuilder<List<Recipe>>(
-      valueListenable: importedRecipesNotifier,
-      builder: (context, importedRecipes, _) =>
-          _RecipeListBody(
-            importedRecipes: importedRecipes,
-            onOpenRecipe: (r) => _openRecipe(context, r),
-            onOpenImport: () => _openImport(context),
-          ),
+      valueListenable: recommendedRecipesNotifier,
+      builder: (context, recommendedRecipes, _) =>
+          ValueListenableBuilder<List<Recipe>>(
+        valueListenable: importedRecipesNotifier,
+        builder: (context, importedRecipes, _) => _RecipeListBody(
+          importedRecipes: importedRecipes,
+          recommendedRecipes: recommendedRecipes,
+          onOpenRecipe: (r) => _openRecipe(context, r),
+          onOpenImport: () => _openImport(context),
+          onOpenSurpriseMe: () => _openSurpriseMe(context),
+        ),
+      ),
     );
   }
 }
@@ -52,13 +67,17 @@ class RecipeListScreen extends StatelessWidget {
 class _RecipeListBody extends StatelessWidget {
   const _RecipeListBody({
     required this.importedRecipes,
+    required this.recommendedRecipes,
     required this.onOpenRecipe,
     required this.onOpenImport,
+    required this.onOpenSurpriseMe,
   });
 
   final List<Recipe> importedRecipes;
+  final List<Recipe> recommendedRecipes;
   final void Function(Recipe) onOpenRecipe;
   final VoidCallback onOpenImport;
+  final VoidCallback onOpenSurpriseMe;
 
   @override
   Widget build(BuildContext context) {
@@ -109,8 +128,28 @@ class _RecipeListBody extends StatelessWidget {
                       label: 'Import recipe from a website link',
                       child: _ImportButton(onTap: onOpenImport),
                     ),
+                    const SizedBox(height: 10),
+                    // ── Surprise Me button ───────────────────────────────
+                    Semantics(
+                      button: true,
+                      label: 'Surprise Me – scan pantry and get recipe ideas',
+                      child: _SurpriseMeButton(onTap: onOpenSurpriseMe),
+                    ),
 
-                    // ── Imported recipes — shown at the top (session-only) ──
+                    // ── Recommended recipes — shown at the top (session-only) ──
+                    if (recommendedRecipes.isNotEmpty) ...[
+                      RecipeSectionHeader(title: 'Recommended Recipes'),
+                      for (final recipe in recommendedRecipes) ...[
+                        _RecipeCard(
+                          recipe: recipe,
+                          onTap: () => onOpenRecipe(recipe),
+                          isRecommended: true,
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                    ],
+
+                    // ── Imported recipes — shown next (session-only) ──
                     if (importedRecipes.isNotEmpty) ...[
                       RecipeSectionHeader(title: 'Imported Recipes'),
                       for (final recipe in importedRecipes) ...[
@@ -194,6 +233,57 @@ class _ImportButton extends StatelessWidget {
   }
 }
 
+// ─── _SurpriseMeButton ────────────────────────────────────────────────────────
+
+class _SurpriseMeButton extends StatelessWidget {
+  const _SurpriseMeButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                const Color(0xFF4DEBA0).withValues(alpha: 0.18),
+                kBrandPurpleLight.withValues(alpha: 0.18),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: const Color(0xFF4DEBA0).withValues(alpha: 0.6),
+              width: 1.5,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('✨', style: TextStyle(fontSize: 18)),
+                const SizedBox(width: 10),
+                const Text(
+                  'Surprise Me!',
+                  style: TextStyle(
+                    color: Color(0xFF4DEBA0),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─── _RecipeCard ──────────────────────────────────────────────────────────────
 
 class _RecipeCard extends StatelessWidget {
@@ -201,11 +291,13 @@ class _RecipeCard extends StatelessWidget {
     required this.recipe,
     required this.onTap,
     this.isImported = false,
+    this.isRecommended = false,
   });
 
   final Recipe recipe;
   final VoidCallback onTap;
   final bool isImported;
+  final bool isRecommended;
 
   /// Full accessible description read by screen readers.
   String _semanticLabel() {
@@ -263,6 +355,26 @@ class _RecipeCard extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 11,
                         color: kBrandPurpleLight,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                if (isRecommended) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A4A2E).withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      '✨ Suggested',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF4DEBA0),
                         fontWeight: FontWeight.w600,
                       ),
                     ),

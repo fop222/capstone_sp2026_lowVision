@@ -57,6 +57,10 @@ class Recipe {
   /// Used to hide Tools / Instructions on the detail page.
   final bool isImported;
 
+  /// True for recipes suggested by Gemini via the "Surprise Me!" feature.
+  /// Behaves like [isImported] (shows ingredients, hides steps).
+  final bool isRecommended;
+
   const Recipe({
     required this.id,
     required this.name,
@@ -70,6 +74,7 @@ class Recipe {
     this.steps = const [],
     this.servings,
     this.isImported = false,
+    this.isRecommended = false,
   });
 
   /// True once ingredients and/or steps have been added.
