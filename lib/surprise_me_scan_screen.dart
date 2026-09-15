@@ -46,8 +46,9 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
   Uint8List? _previewBytes;     // last captured frame
 
   // ── Detected ingredients (accumulated across all scans) ────────────────────
-  // Each entry is a (name, location) record.
-  final List<({String name, String location})> _detected = [];
+  // Map of lowercased name → (display name, location).
+  // Using a Map guarantees no duplicate names regardless of how many scans run.
+  final Map<String, ({String name, String location})> _detectedMap = {};
 
   // ── TTS & gallery ──────────────────────────────────────────────────────────
   final FlutterTts _tts = FlutterTts();
@@ -229,15 +230,13 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
     final answer = await _runVlmPredict(bytes);
     final parsed = _parseItems(answer);
 
-    // Find genuinely new items — deduplicate both against the running list
-    // AND within the results of this single scan (same item at different
-    // regions counts only once, keeping the first occurrence).
-    final seenNames = _detected.map((d) => d.name.toLowerCase()).toSet();
+    // Find genuinely new items — the Map key guarantees no duplicates
+    // both within this scan and across all previous scans.
     final newItems = <({String name, String location})>[];
     for (final p in parsed) {
       final key = p.name.toLowerCase();
-      if (!seenNames.contains(key)) {
-        seenNames.add(key);
+      if (!_detectedMap.containsKey(key)) {
+        _detectedMap[key] = p;
         newItems.add(p);
       }
     }
@@ -245,9 +244,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
     if (!mounted) return;
     setState(() {
       _scanning = false;
-      for (final item in newItems) {
-        _detected.add(item);
-      }
+      // newItems were already inserted into _detectedMap above.
     });
 
     if (newItems.isEmpty) {
@@ -268,7 +265,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
   Future<void> _onDoneScanning() async {
     if (_generating) return;
 
-    if (_detected.isEmpty) {
+    if (_detectedMap.isEmpty) {
       await _speak(
         'No ingredients detected yet. '
         'Please scan your pantry or fridge first.',
@@ -279,7 +276,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
     setState(() => _generating = true);
     await _speak('Generating recipe suggestions. Please wait.');
 
-    final names = _detected.map((d) => d.name).toList();
+    final names = _detectedMap.values.map((d) => d.name).toList();
     final recipes = await generateRecipeSuggestions(names);
 
     if (!mounted) return;
@@ -436,9 +433,9 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
             children: [
               Expanded(
                 child: Text(
-                  _detected.isEmpty
+                  _detectedMap.isEmpty
                       ? 'Detected Ingredients'
-                      : 'Detected (${_detected.length})',
+                      : 'Detected (${_detectedMap.length})',
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
@@ -452,7 +449,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
 
           // ── Ingredient chips (scrollable) ────────────────────────────────
           Expanded(
-            child: _detected.isEmpty
+            child: _detectedMap.isEmpty
                 ? const Center(
                     child: Text(
                       'No ingredients detected yet.\nPoint camera at your pantry or fridge.',
@@ -465,7 +462,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
                       spacing: 8,
                       runSpacing: 6,
                       children: [
-                        for (final item in _detected)
+                        for (final item in _detectedMap.values)
                           _IngredientChip(
                             name: item.name,
                             location: item.location,
