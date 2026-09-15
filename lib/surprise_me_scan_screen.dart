@@ -229,11 +229,18 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
     final answer = await _runVlmPredict(bytes);
     final parsed = _parseItems(answer);
 
-    // Find genuinely new items (case-insensitive dedup).
-    final existing = _detected.map((d) => d.name.toLowerCase()).toSet();
-    final newItems = parsed
-        .where((p) => !existing.contains(p.name.toLowerCase()))
-        .toList();
+    // Find genuinely new items — deduplicate both against the running list
+    // AND within the results of this single scan (same item at different
+    // regions counts only once, keeping the first occurrence).
+    final seenNames = _detected.map((d) => d.name.toLowerCase()).toSet();
+    final newItems = <({String name, String location})>[];
+    for (final p in parsed) {
+      final key = p.name.toLowerCase();
+      if (!seenNames.contains(key)) {
+        seenNames.add(key);
+        newItems.add(p);
+      }
+    }
 
     if (!mounted) return;
     setState(() {
