@@ -167,11 +167,18 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
   }
 
   /// Parses "ItemName | region" lines from [answer].
+  /// Filters out any line whose name is "none", "not found", or blank.
   List<({String name, String location})> _parseItems(String answer) {
     final upper = answer.trim().toUpperCase();
     if (upper == 'NONE' ||
         upper.startsWith('NONE\n') ||
         upper.startsWith('NOT FOUND')) return [];
+
+    // Words that the VLM uses when it found nothing — never show as food items.
+    const _kJunkNames = {
+      'none', 'not found', 'none found', 'no items', 'no items found',
+      'n/a', 'nothing', 'unknown',
+    };
 
     final results = <({String name, String location})>[];
     for (final raw in answer.split(RegExp(r'\r?\n'))) {
@@ -189,6 +196,8 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
         name = line.replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), '').trim();
       }
       if (name.isEmpty) continue;
+      // Skip junk / placeholder names.
+      if (_kJunkNames.contains(name.toLowerCase())) continue;
       // Capitalise first letter.
       name = name[0].toUpperCase() + name.substring(1);
       results.add((name: name, location: location));
@@ -307,7 +316,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
         backgroundColor: Colors.black,
         title: const Text(
           'Surprise Me!',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: Colors.white, fontSize: 22),
         ),
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
@@ -319,8 +328,8 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
                 color: (_scanning || _generating)
                     ? Colors.white38
                     : kBrandPurpleLight,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
@@ -426,7 +435,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w700,
-                    fontSize: 15,
+                    fontSize: 22,
                   ),
                 ),
               ),
@@ -440,7 +449,7 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
                 ? const Center(
                     child: Text(
                       'No ingredients detected yet.\nPoint camera at your pantry or fridge.',
-                      style: TextStyle(color: Colors.white38, fontSize: 13),
+                      style: TextStyle(color: Colors.white54, fontSize: 18),
                       textAlign: TextAlign.center,
                     ),
                   )
@@ -515,16 +524,17 @@ class _IngredientChip extends StatelessWidget {
             name,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
             ),
           ),
           if (location.isNotEmpty)
             Text(
               location,
               style: TextStyle(
-                color: kBrandPurpleLight.withValues(alpha: 0.8),
-                fontSize: 11,
+                color: kBrandPurpleLight.withValues(alpha: 0.9),
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
               ),
             ),
         ],
@@ -549,21 +559,21 @@ class _ScanButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        height: 48,
+        height: 60,
         decoration: BoxDecoration(
           color: outlined
               ? Colors.transparent
               : (onTap == null
                   ? kBrandPurpleMid.withValues(alpha: 0.3)
                   : kBrandPurpleMid),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: onTap == null
                 ? Colors.white12
                 : kBrandPurpleLight.withValues(alpha: 0.7),
-            width: 1.5,
+            width: 2,
           ),
         ),
         child: Center(
@@ -571,8 +581,8 @@ class _ScanButton extends StatelessWidget {
             label,
             style: TextStyle(
               color: onTap == null ? Colors.white30 : Colors.white,
-              fontWeight: FontWeight.w600,
-              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              fontSize: 20,
             ),
           ),
         ),
