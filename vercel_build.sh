@@ -30,4 +30,10 @@ if [ -n "$OCR_BASE_URL_VALUE" ]; then
   BUILD_ARGS+=(--dart-define=OCR_BASE_URL="$OCR_BASE_URL_VALUE")
 fi
 
+# Optional: pass GEMINI_API_KEY at build time for the Surprise Me! feature.
+GEMINI_API_KEY_VALUE="${GEMINI_API_KEY:-}"
+if [ -n "$GEMINI_API_KEY_VALUE" ]; then
+  BUILD_ARGS+=(--dart-define=GEMINI_API_KEY="$GEMINI_API_KEY_VALUE")
+fi
+
 flutter build web "${BUILD_ARGS[@]}"

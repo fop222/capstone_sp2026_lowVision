@@ -5,8 +5,15 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import 'api_keys.dart' show kGeminiApiKey;
+import 'imported_recipes_state.dart' show kImportedCategory;
 import 'recipe_data.dart';
+
+/// Gemini API key — injected at build time via:
+///   flutter build web --dart-define=GEMINI_API_KEY=<your_key>
+/// On Vercel, set GEMINI_API_KEY as an environment variable and the
+/// build script (vercel_build.sh) forwards it automatically.
+const String kGeminiApiKey =
+    String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
 
 const _kGeminiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/models/'
@@ -22,11 +29,11 @@ Future<List<Recipe>> generateRecipeSuggestions(
   final ingredientList = detectedIngredients.join(', ');
 
   final prompt = '''
-You are a helpful cooking assistant. Based on the following ingredients found in someone's kitchen, suggest exactly 5 recipes they could make.
+You are a helpful cooking assistant. Based on the following ingredients found in someone's kitchen, suggest exactly 2 recipes they could make.
 
 Detected ingredients: $ingredientList
 
-Return ONLY a valid JSON array of exactly 5 recipe objects — no markdown, no explanation, no extra text. Each object must have exactly these fields:
+Return ONLY a valid JSON array of exactly 2 recipe objects — no markdown, no explanation, no extra text. Each object must have exactly these fields:
 {
   "name": "Recipe Name",
   "estimatedTimeMinutes": 30,
