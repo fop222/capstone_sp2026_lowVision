@@ -1595,7 +1595,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     // ── Pantry fallback after 3 consecutive misses ───────────────────────────
     if (widget.pantryMode && _pantryFallbackActive && foundTargets.isEmpty) {
       const fallbackMsg =
-          'Remove some items from the fridge or pantry to check against your list.';
+          'No items detected. Please remove some items from the fridge or pantry to check against your list.';
       setState(() => _shelfStatusMessage = fallbackMsg);
       await _speak(fallbackMsg);
       return;
