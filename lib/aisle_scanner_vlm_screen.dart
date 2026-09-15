@@ -434,6 +434,16 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   /// Last captured frame shown while processing and on the results screen.
   Uint8List? _scanPreviewBytes;
 
+  // ── Pantry / Fridge mode extras ──────────────────────────────────────────
+  /// Maps item.id → detected region string (e.g. "bottom right") for the
+  /// current scan, so the check-off dialog can include the location.
+  final Map<String, String> _lastPantryLocations = {};
+  /// Number of consecutive pantry scans that matched NOTHING on the list.
+  int _pantryConsecutiveMisses = 0;
+  /// Set to true after 3 consecutive misses; cleared on a successful match
+  /// or when the session is restarted.
+  bool _pantryFallbackActive = false;
+
   late List<_Item> _items;
   late Map<String, bool> _initialCheckedById;
 
@@ -1161,10 +1171,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         (targetOnShelfByOcr || !shelfMatchesOtherListItem);
   }
 
-  /// Parses the open-ended pantry VLM response (one food item per line) and
+  /// Parses the pantry VLM response (format: "ItemName | region" per line) and
   /// fuzzy-matches each detected item against [targets].
   /// Returns every target whose name is confidently matched by at least one line.
+  /// Populates [_lastPantryLocations] with item.id → region for matched items.
   List<_Item> _parsePantryFoundItems(String answer, List<_Item> targets) {
+    _lastPantryLocations.clear();
     final upper = answer.trim().toUpperCase();
     // Model explicitly found nothing.
     if (upper == 'NONE' ||
@@ -1184,8 +1196,19 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         .where((l) => l.isNotEmpty && !l.endsWith(':') && !l.startsWith('-'));
 
     for (final line in lines) {
+      // Parse "ItemName | region" format (region is optional for robustness).
+      String itemText;
+      String location = '';
+      if (line.contains('|')) {
+        final parts = line.split('|');
+        itemText = parts[0].trim();
+        location = parts[1].trim().toLowerCase();
+      } else {
+        itemText = line;
+      }
+
       // Strip any stray leading bullets or numbers (e.g. "1. Yogurt" → "Yogurt")
-      final cleaned = line.replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), '');
+      final cleaned = itemText.replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), '');
       if (cleaned.isEmpty) continue;
 
       for (final target in targets) {
@@ -1195,11 +1218,13 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         // Substring match (handles "Greek Yogurt" matching target "Yogurt", etc.)
         if (dLow.contains(tLow) || tLow.contains(dLow)) {
           found.add(target);
+          if (location.isNotEmpty) _lastPantryLocations[target.id] = location;
           continue;
         }
         // Fallback: existing token-level fuzzy helper
         if (_vlmAnswerMatchesTarget(cleaned, target)) {
           found.add(target);
+          if (location.isNotEmpty) _lastPantryLocations[target.id] = location;
         }
       }
     }
@@ -1409,16 +1434,21 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     if (widget.pantryMode && targets.isNotEmpty) {
       // ── Pantry / Fridge prompt ────────────────────────────────────────────
-      // Open-ended detection: ask WHAT is visible (no list supplied to the
-      // model) then cross-reference the answer against targets client-side.
+      // Open-ended detection: ask WHAT is visible AND where, then cross-reference
+      // the answer against targets client-side.
       // This prevents the model from hallucinating items it was primed to find.
       question =
           gatePreamble +
           'Look carefully at this photo of a refrigerator, pantry, or kitchen cabinet. '
           'List ONLY the food items you can clearly and certainly identify in the image. '
-          'Be very conservative — if you are not 100% sure what an item is, do NOT list it. '
-          'Write one item per line using just the food name (no brand, no description). '
-          'Example:\nGreek Yogurt\nMilk\nOrange Juice\n'
+          'Be very conservative — if you are not 100%% sure what an item is, do NOT list it. '
+          'For each item write one line in this exact format:  ItemName | region\n'
+          'Use one of these nine regions to describe roughly where the item appears:\n'
+          '  top left, top, top right, middle left, middle, middle right, bottom left, bottom, bottom right\n'
+          'Example:\n'
+          'Greek Yogurt | middle left\n'
+          'Milk | bottom\n'
+          'Orange Juice | top right\n'
           'If you cannot confidently identify any food items, write exactly: NONE';
     } else if (targets.isEmpty) {
       question =
@@ -1548,6 +1578,29 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       }
     });
 
+    // ── Pantry consecutive-miss tracking ────────────────────────────────────
+    if (widget.pantryMode) {
+      if (foundTargets.isNotEmpty) {
+        // Successful match — reset the miss streak.
+        _pantryConsecutiveMisses = 0;
+        _pantryFallbackActive = false;
+      } else {
+        _pantryConsecutiveMisses++;
+        if (_pantryConsecutiveMisses >= 3) {
+          _pantryFallbackActive = true;
+        }
+      }
+    }
+
+    // ── Pantry fallback after 3 consecutive misses ───────────────────────────
+    if (widget.pantryMode && _pantryFallbackActive && foundTargets.isEmpty) {
+      const fallbackMsg =
+          'Remove some items from the fridge or pantry to check against your list.';
+      setState(() => _shelfStatusMessage = fallbackMsg);
+      await _speak(fallbackMsg);
+      return;
+    }
+
     // Pantry mode: announce only the matched ingredient names, not the full
     // VLM brand/size/location output.
     if (widget.pantryMode && foundTargets.isNotEmpty) {
@@ -1561,7 +1614,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     for (final item in foundTargets) {
       if (!mounted) return;
-      final wantCheck = await _showCheckOffItemDialog(itemName: item.name);
+      final wantCheck = await _showCheckOffItemDialog(
+        itemName: item.name,
+        location: _lastPantryLocations[item.id],
+      );
       if (!mounted) return;
       if (wantCheck == true) {
         setState(() => item.isChecked = true);
@@ -1627,12 +1683,23 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     );
   }
 
-  Future<bool?> _showCheckOffItemDialog({required String itemName}) async {
-    await _speak(
-      widget.pantryMode
+  Future<bool?> _showCheckOffItemDialog({
+    required String itemName,
+    String? location, // e.g. "bottom right" — only used in pantry mode
+  }) async {
+    final String spokenText;
+    final String displayLabel;
+    if (widget.pantryMode && location != null && location.isNotEmpty) {
+      spokenText =
+          '$itemName is detected at the $location. Do you want to check it off your list? Yes or no.';
+      displayLabel = 'Detected at the $location';
+    } else {
+      spokenText = widget.pantryMode
           ? '$itemName was detected in your pantry or fridge. Do you want to check it off your list? Yes or no.'
-          : 'This looks like a match for $itemName. Do you want to check it off your list? Yes or no.',
-    );
+          : 'This looks like a match for $itemName. Do you want to check it off your list? Yes or no.';
+      displayLabel = widget.pantryMode ? 'Detected: ' : 'Looking for: ';
+    }
+    await _speak(spokenText);
     if (!mounted) return null;
 
     return showDialog<bool>(
@@ -1652,21 +1719,30 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    widget.pantryMode ? 'Detected: ' : 'Looking for: ',
+                    displayLabel,
                     style: const TextStyle(
                         fontSize: 22, fontWeight: FontWeight.w600),
                   ),
-                  Expanded(
-                    child: Text(
-                      itemName,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w600,
+                  if (location == null || location.isEmpty || !widget.pantryMode)
+                    Expanded(
+                      child: Text(
+                        itemName,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
+              if (widget.pantryMode && location != null && location.isNotEmpty)
+                Text(
+                  itemName,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               const SizedBox(height: 16),
               Text(
                 widget.pantryMode
