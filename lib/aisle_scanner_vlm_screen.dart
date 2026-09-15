@@ -1586,7 +1586,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         _pantryFallbackActive = false;
       } else {
         _pantryConsecutiveMisses++;
-        if (_pantryConsecutiveMisses >= 3) {
+        if (_pantryConsecutiveMisses >= 2) {
           _pantryFallbackActive = true;
         }
       }
