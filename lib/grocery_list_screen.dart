@@ -867,8 +867,8 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
                                       ),
                                         ], // Row children
                                       ), // Row
-                                      // ── Scan Pantry / Fridge (recipe lists only) ──
-                                      if (isRecipeList(listTitle) || isImportedRecipeList(listTitle) || isRecommendedRecipeList(listTitle)) ...[
+                                      // ── Scan Pantry / Fridge (all lists) ──
+                                      ...[
                                         const SizedBox(height: 10),
                                         const Divider(
                                             color: Colors.white12,

@@ -1581,9 +1581,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     // ── Pantry consecutive-miss tracking ────────────────────────────────────
     if (widget.pantryMode) {
       if (foundTargets.isNotEmpty) {
-        // Successful match — reset the miss streak.
+        // Successful match — miss streak stops counting, but the fallback
+        // message state is intentionally kept active for the rest of this
+        // scanning session.  It resets only when the user fully exits the
+        // pantry/fridge scanner (widget disposed / new session).
         _pantryConsecutiveMisses = 0;
-        _pantryFallbackActive = false;
       } else {
         _pantryConsecutiveMisses++;
         if (_pantryConsecutiveMisses >= 2) {
@@ -1592,7 +1594,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       }
     }
 
-    // ── Pantry fallback after 3 consecutive misses ───────────────────────────
+    // ── Pantry fallback message ──────────────────────────────────────────────
+    // Show and speak the fallback instruction ONLY when fallback is active AND
+    // nothing was found.  If items ARE found while fallback is active, skip
+    // this block entirely — the normal detection pipeline runs below.
     if (widget.pantryMode && _pantryFallbackActive && foundTargets.isEmpty) {
       const fallbackMsg =
           'No items detected. Please remove some items from the fridge or pantry to check against your list.';
