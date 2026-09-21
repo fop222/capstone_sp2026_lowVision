@@ -16,11 +16,15 @@ import 'recipe_data.dart';
 /// build script (vercel_build.sh) forwards it automatically.
 const String kGeminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
 
-/// Current Flash models. Try newest first; fall back if a name is unavailable.
+/// Prefer high-capacity Flash models. 3.6 often returns 503 under load,
+/// so it is last — we skip to the next model immediately on 503/429.
 const List<String> _kGeminiModels = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
   'gemini-2.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+  'gemini-3.6-flash',
 ];
 
 const _kGeminiBase =
@@ -95,90 +99,82 @@ Rules:
     };
   }
 
-  for (final model in _kGeminiModels) {
-    final recipes = await _requestRecipes(
-      model: model,
-      body: jsonEncode(requestBody()),
-    );
-    if (recipes.isNotEmpty) return recipes;
+  final bodyWithThinking = jsonEncode(requestBody());
+  final bodyWithoutThinking = jsonEncode(requestBody(includeThinkingConfig: false));
+
+  // Two passes: first try every model, then wait and try the list once more.
+  for (int pass = 1; pass <= 2; pass++) {
+    if (pass == 2) {
+      print('[Gemini] All models busy; waiting 5s and retrying...');
+      await Future.delayed(const Duration(seconds: 5));
+    }
+    for (final model in _kGeminiModels) {
+      var recipes = await _requestRecipes(model: model, body: bodyWithThinking);
+      if (recipes == null) {
+        recipes = await _requestRecipes(model: model, body: bodyWithoutThinking);
+      }
+      if (recipes != null && recipes.isNotEmpty) return recipes;
+    }
   }
 
   return [];
 }
 
-Future<List<Recipe>> _requestRecipes({
+/// Returns parsed recipes, an empty list if the model responded but was
+/// unusable, or null to try the same model without thinkingConfig / skip on.
+Future<List<Recipe>?> _requestRecipes({
   required String model,
   required String body,
 }) async {
-  final uri = Uri.parse('$_kGeminiBase$model:generateContent?key=$kGeminiApiKey');
+  final uri = Uri.parse(
+    '$_kGeminiBase$model:generateContent?key=$kGeminiApiKey',
+  );
 
-  // Try up to 3 times if Gemini times out or temporarily returns 503/429.
-  for (int attempt = 1; attempt <= 3; attempt++) {
-    try {
-      print('[Gemini] Sending request to $model (attempt $attempt)...');
+  try {
+    print('[Gemini] Sending request to $model...');
 
-      final response = await http
-          .post(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: body,
-          )
-          .timeout(const Duration(seconds: 90));
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: body,
+        )
+        .timeout(const Duration(seconds: 60));
 
-      if (response.statusCode == 200) {
-        final recipes = _parseRecipes(response.body);
-        if (recipes.isEmpty) {
-          print('[Gemini] $model returned 200 but no usable recipes.');
-        }
-        return recipes;
+    if (response.statusCode == 200) {
+      final recipes = _parseRecipes(response.body);
+      if (recipes.isEmpty) {
+        print('[Gemini] $model returned 200 but no usable recipes.');
       }
+      return recipes;
+    }
 
-      if (response.statusCode == 400 && body.contains('thinkingConfig')) {
-        print('[Gemini] $model rejected thinkingConfig; retrying without it.');
-        final stripped = body.replaceAll(
-          '"thinkingConfig":{"thinkingBudget":0},',
-          '',
-        ).replaceAll(
-          ',"thinkingConfig":{"thinkingBudget":0}',
-          '',
-        );
-        if (stripped != body) {
-          return _requestRecipes(model: model, body: stripped);
-        }
-      }
+    if (response.statusCode == 400 && body.contains('thinkingConfig')) {
+      print('[Gemini] $model rejected thinkingConfig; retrying without it.');
+      return null;
+    }
 
-      if (response.statusCode == 404) {
-        print('[Gemini] Model $model is not available (404).');
-        return [];
-      }
-
-      if (response.statusCode == 503 || response.statusCode == 429) {
-        print(
-          '[Gemini] Server busy (${response.statusCode}). Attempt $attempt of 3.',
-        );
-        if (attempt < 3) {
-          await Future.delayed(Duration(seconds: attempt * 2));
-          continue;
-        }
-      }
-
-      print('[Gemini] HTTP ${response.statusCode}: ${response.body}');
-      return [];
-    } on TimeoutException {
-      print('[Gemini] Request timed out on attempt $attempt of 3.');
-      if (attempt < 3) {
-        await Future.delayed(Duration(seconds: attempt * 2));
-        continue;
-      }
-      print('[Gemini] All retry attempts timed out.');
-      return [];
-    } catch (e) {
-      print('[Gemini] Error: $e');
+    if (response.statusCode == 404) {
+      print('[Gemini] Model $model is not available (404); trying next.');
       return [];
     }
-  }
 
-  return [];
+    if (response.statusCode == 503 || response.statusCode == 429) {
+      print(
+        '[Gemini] $model busy (${response.statusCode}); switching models.',
+      );
+      return [];
+    }
+
+    print('[Gemini] HTTP ${response.statusCode}: ${response.body}');
+    return [];
+  } on TimeoutException {
+    print('[Gemini] $model timed out; trying next model.');
+    return [];
+  } catch (e) {
+    print('[Gemini] $model error: $e');
+    return [];
+  }
 }
 
 List<Recipe> _parseRecipes(String responseBody) {
