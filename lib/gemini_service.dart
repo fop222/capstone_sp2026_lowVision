@@ -14,12 +14,12 @@ import 'recipe_data.dart';
 /// On Vercel, set GEMINI_API_KEY as an environment variable and the
 /// build script (vercel_build.sh) forwards it automatically.
 const String kGeminiApiKey =
-    String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
+    String.fromEnvironment('GEMINI_API_KEY');
 
 const _kGeminiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/models/'
     'gemini-3.6-flash:generateContent';
-    
+
 /// Generates up to 2 recipe suggestions based on [detectedIngredients].
 /// Returns an empty list on any error so the caller can show a graceful message.
 Future<List<Recipe>> generateRecipeSuggestions(
