@@ -79,7 +79,7 @@ Rules:
               },
             }),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 120));
 
       // Successful response
       if (response.statusCode == 200) {
