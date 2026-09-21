@@ -17,7 +17,7 @@ const String kGeminiApiKey =
 
 const _kGeminiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/models/'
-     'gemini-3.6-flash:generateContent';
+    'gemini-3.6-flash:generateContent';
 
 /// Generates up to 5 recipe suggestions based on [detectedIngredients].
 /// Returns an empty list on any error so the caller can show a graceful message.
@@ -59,56 +59,116 @@ Rules:
 
   try {
     final uri = Uri.parse('$_kGeminiEndpoint?key=$kGeminiApiKey');
-    final response = await http
-        .post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'contents': [
-              {
-                'parts': [
-                  {'text': prompt}
-                ]
-              }
-            ],
-            'generationConfig': {
-              'temperature': 0.7,
-              'maxOutputTokens': 4096,
-            },
-          }),
-        )
-        .timeout(const Duration(seconds: 30));
 
-    if (response.statusCode != 200) {
-      print('[Gemini] HTTP ${response.statusCode}: ${response.body}');
+    // Try up to 3 times if Gemini temporarily returns 503.
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'contents': [
+                {
+                  'parts': [
+                    {'text': prompt}
+                  ]
+                }
+              ],
+              'generationConfig': {
+                'maxOutputTokens': 4096,
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      // Successful response
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+
+        final candidates = decoded['candidates'] as List?;
+        if (candidates == null || candidates.isEmpty) {
+          print('[Gemini] No candidates returned.');
+          return [];
+        }
+
+        final candidate = candidates.first as Map<String, dynamic>;
+        final content = candidate['content'] as Map<String, dynamic>?;
+        final parts = content?['parts'] as List?;
+
+        if (parts == null || parts.isEmpty) {
+          print('[Gemini] No content returned.');
+          return [];
+        }
+
+        final rawText = parts.first['text'] as String? ?? '';
+
+        if (rawText.isEmpty) {
+          print('[Gemini] Empty response.');
+          return [];
+        }
+
+        // Extract the JSON array even if the model wraps it in backticks.
+        final match =
+            RegExp(r'\[[\s\S]*\]', dotAll: true).firstMatch(rawText);
+
+        if (match == null) {
+          print(
+            '[Gemini] Could not find JSON array in response:\n$rawText',
+          );
+          return [];
+        }
+
+        final list = jsonDecode(match.group(0)!) as List<dynamic>;
+
+        // We asked Gemini for exactly 2 recipes.
+        if (list.length != 2) {
+          print(
+            '[Gemini] Expected 2 recipes but received ${list.length}.',
+          );
+          return [];
+        }
+
+        final ts = DateTime.now().millisecondsSinceEpoch;
+
+        return list
+            .asMap()
+            .entries
+            .map(
+              (e) => _recipeFromMap(
+                e.value as Map<String, dynamic>,
+                id: 'gemini_${ts}_${e.key}',
+              ),
+            )
+            .toList();
+      }
+
+      // Gemini is temporarily unavailable.
+      if (response.statusCode == 503) {
+        print(
+          '[Gemini] Service unavailable (503). '
+          'Attempt $attempt of 3.',
+        );
+
+        if (attempt < 3) {
+          // Wait 2 seconds, then 4 seconds before retrying.
+          await Future.delayed(
+            Duration(seconds: attempt * 2),
+          );
+          continue;
+        }
+
+        print('[Gemini] Failed after 3 attempts.');
+        return [];
+      }
+
+      // Other API errors should not be retried.
+      print(
+        '[Gemini] HTTP ${response.statusCode}: ${response.body}',
+      );
       return [];
     }
 
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final rawText = (decoded['candidates'] as List?)
-            ?.firstOrNull
-            ?['content']?['parts']
-            ?[0]?['text'] as String? ??
-        '';
-
-    if (rawText.isEmpty) return [];
-
-    // Extract the JSON array even if the model wraps it in backticks.
-    final match =
-        RegExp(r'\[[\s\S]*\]', dotAll: true).firstMatch(rawText);
-    if (match == null) {
-      print('[Gemini] Could not find JSON array in response:\n$rawText');
-      return [];
-    }
-
-    final list = jsonDecode(match.group(0)!) as List<dynamic>;
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    return list
-        .asMap()
-        .entries
-        .map((e) => _recipeFromMap(e.value as Map<String, dynamic>,
-            id: 'gemini_${ts}_${e.key}'))
-        .toList();
+    return [];
   } catch (e) {
     print('[Gemini] Error: $e');
     return [];
@@ -119,23 +179,35 @@ Rules:
 
 Recipe _recipeFromMap(Map<String, dynamic> m, {required String id}) {
   String s(String key) => (m[key] as String? ?? '').trim();
+
   int i(String key, int fallback) {
     final v = m[key];
+
     if (v is int) return v;
     if (v is double) return v.round();
     if (v is String) return int.tryParse(v) ?? fallback;
+
     return fallback;
   }
 
   // Ingredients
   final rawIngs = m['ingredients'];
   final ingredients = <RecipeIngredient>[];
+
   if (rawIngs is List) {
     for (final item in rawIngs) {
       if (item is Map) {
         final name = (item['name'] as String? ?? '').trim();
         final qty = (item['quantity'] as String? ?? '').trim();
-        if (name.isNotEmpty) ingredients.add(RecipeIngredient(name, quantity: qty));
+
+        if (name.isNotEmpty) {
+          ingredients.add(
+            RecipeIngredient(
+              name,
+              quantity: qty,
+            ),
+          );
+        }
       }
     }
   }
@@ -143,23 +215,34 @@ Recipe _recipeFromMap(Map<String, dynamic> m, {required String id}) {
   // Steps
   final rawSteps = m['steps'];
   final steps = <String>[];
+
   if (rawSteps is List) {
     for (final step in rawSteps) {
       final text = (step as String? ?? '').trim();
-      if (text.isNotEmpty) steps.add(text);
+
+      if (text.isNotEmpty) {
+        steps.add(text);
+      }
     }
   }
 
   // Dietary preferences
   final rawDiet = m['dietaryPreferences'];
   final dietaryPrefs = <String>[];
+
   if (rawDiet is List) {
     for (final pref in rawDiet) {
       final text = (pref as String? ?? '').trim();
-      if (text.isNotEmpty) dietaryPrefs.add(text);
+
+      if (text.isNotEmpty) {
+        dietaryPrefs.add(text);
+      }
     }
   }
-  if (dietaryPrefs.isEmpty) dietaryPrefs.add('No Restrictions');
+
+  if (dietaryPrefs.isEmpty) {
+    dietaryPrefs.add('No Restrictions');
+  }
 
   return Recipe(
     id: id,
