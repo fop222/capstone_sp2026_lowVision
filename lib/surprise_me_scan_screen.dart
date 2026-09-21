@@ -262,48 +262,85 @@ class _SurpriseMeScanScreenState extends State<SurpriseMeScanScreen> {
   }
 
   // ── Done Scanning ────────────────────────────────────────────────────────────
-  Future<void> _onDoneScanning() async {
-    if (_generating) return;
+Future<void> _onDoneScanning() async {
+  if (_generating) return;
 
-    if (_detectedMap.isEmpty) {
-      await _speak(
-        'No ingredients detected yet. '
-        'Please scan your pantry or fridge first.',
-      );
-      return;
-    }
+  if (_detectedMap.isEmpty) {
+    await _speak(
+      'No ingredients detected yet. '
+      'Please scan your pantry or fridge first.',
+    );
+    return;
+  }
 
-    setState(() => _generating = true);
-    await _speak('Generating recipe suggestions. Please wait.');
+  // Show the loading screen
+  setState(() => _generating = true);
 
-    final names = _detectedMap.values.map((d) => d.name).toList();
+  // Don't await TTS here.
+  // If TTS gets stuck, it would otherwise prevent Gemini from running.
+  _speak('Generating recipe suggestions. Please wait.');
+
+  try {
+    final names = _detectedMap.values
+        .map((d) => d.name)
+        .toList();
+
+    print('[Surprise Me] Detected ingredients: $names');
+    print('[Surprise Me] Calling Gemini...');
+
     final recipes = await generateRecipeSuggestions(names);
 
+    print('[Surprise Me] Gemini returned ${recipes.length} recipes');
+
     if (!mounted) return;
+
+    // Stop the loading screen no matter what Gemini returned.
     setState(() => _generating = false);
 
     if (recipes.isEmpty) {
-      // Gemini not yet configured — go back and show a snackbar.
-      Navigator.of(context).pop();
-      // Show message after pop so the recipe list scaffold is visible.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Recipe suggestions coming soon! '
-              'Gemini API key not yet configured.',
-            ),
-            duration: const Duration(seconds: 4),
+      print('[Surprise Me] No recipes were generated.');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'I could not generate recipes right now. '
+            'Please try again.',
           ),
-        );
-      });
+          duration: Duration(seconds: 4),
+        ),
+      );
+
       return;
     }
 
+    print('[Surprise Me] Recipes generated successfully.');
+
+    // Save the recipes so the recipe screen can display them.
     setRecommendedRecipes(recipes);
-    if (mounted) Navigator.of(context).pop();
+
+    // Leave the scanning screen.
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  } catch (e, stackTrace) {
+    print('[Surprise Me] ERROR: $e');
+    print(stackTrace);
+
+    if (!mounted) return;
+
+    // Make absolutely sure the loading screen goes away.
+    setState(() => _generating = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Something went wrong while generating recipes: $e',
+        ),
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
+}
 
   // ── TTS helper ───────────────────────────────────────────────────────────────
   Future<void> _speak(String text) async {
