@@ -17,7 +17,7 @@ const String kGeminiApiKey =
 
 const _kGeminiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/models/'
-    'gemini-1.5-flash:generateContent';
+     'gemini-3.6-flash:generateContent';
 
 /// Generates up to 5 recipe suggestions based on [detectedIngredients].
 /// Returns an empty list on any error so the caller can show a graceful message.
