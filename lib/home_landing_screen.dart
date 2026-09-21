@@ -7,12 +7,14 @@ import 'grocery_ui.dart';
 import 'profile_setup_screen.dart';
 import 'recipe_list_screen.dart';
 import 'supabase_auth_screen.dart';
+import 'surprise_me_state.dart';
 
 /// Top-level home after sign-in: choose Shopping, Cooking, or Eating.
 class HomeLandingScreen extends StatelessWidget {
   const HomeLandingScreen({super.key});
 
   Future<void> _signOut(BuildContext context) async {
+    clearRecommendedRecipes(); // clear Surprise Me! recipes on logout
     await Supabase.instance.client.auth.signOut();
     if (!context.mounted) return;
     Navigator.of(context).pushReplacement(

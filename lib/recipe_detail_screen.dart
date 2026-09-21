@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'cooking_prep_screen.dart';
 import 'grocery_list_screen.dart';
 import 'grocery_ui.dart';
 import 'recipe_data.dart';
@@ -304,7 +305,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
 
                     // ── Start Cooking CTA ───────────────────────────────────
                     // Disabled until cooking steps have been populated.
-                    if (!recipe.hasDetails || recipe.steps.isEmpty) ...[
+                    if (recipe.steps.isEmpty) ...[
                       Center(
                         child: Text(
                           'Cooking steps coming soon.',
@@ -319,7 +320,14 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                     GroceryGlowButton(
                       // Enabled only once cooking steps are available.
                       onPressed:
-                          recipe.steps.isNotEmpty ? () {} : null,
+                          recipe.steps.isNotEmpty ? () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    CookingPrepScreen(recipe: recipe),
+                              ),
+                            );
+                          } : null,
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [

@@ -50,32 +50,48 @@ Future<List<Recipe>> generateRecipeSuggestions(
   final ingredientList = detectedIngredients.join(', ');
 
   final prompt = '''
-You are a helpful cooking assistant. Based on the following ingredients found in someone's kitchen, suggest exactly 2 recipes they could make.
+You are a cooking assistant for a low-vision app called Lumio. Based on the following ingredients found in a user's kitchen, suggest exactly 2 recipes they could make.
 
 Detected ingredients: $ingredientList
 
-Return ONLY a valid JSON array of exactly 2 recipe objects — no markdown, no explanation, no extra text. Each object must have exactly these fields:
+Return ONLY a valid JSON array of exactly 2 recipe objects — no markdown, no explanation, no code fences, no extra text. Each object must use exactly these fields:
+
 {
   "name": "Recipe Name",
   "estimatedTimeMinutes": 30,
   "difficulty": 2,
   "dietaryPreferences": [],
+  "tools": ["Large skillet", "Mixing bowl", "Spatula"],
   "ingredients": [
-    {"name": "eggs", "quantity": "2"},
-    {"name": "flour", "quantity": "1 cup"}
+    {"name": "eggs", "quantity": "2 large"},
+    {"name": "olive oil", "quantity": "1 tablespoon"}
   ],
   "steps": [
-    "Step 1: ...",
-    "Step 2: ..."
+    "Heat 1 tablespoon of olive oil in a large skillet over medium heat for 1 minute.",
+    "Crack 2 large eggs into the skillet and cook for 3 minutes until the whites are set.",
+    "Season with a pinch of salt and serve immediately."
   ]
 }
 
-Rules:
-- difficulty is an integer 1–5 (1 = very easy, 5 = very hard)
-- dietaryPreferences is an array of strings such as "Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free" (empty array if none apply)
-- ingredients must list ALL ingredients needed, not just the detected ones
-- every quantity MUST be a string (e.g. "2", "1 cup"), never a number
-- steps must be complete, numbered step-by-step cooking instructions
+Strict rules:
+1. Generate EXACTLY 2 recipes — no more, no less.
+2. difficulty is an integer 1–5 (1 = very easy, 5 = very hard).
+3. dietaryPreferences is an array such as ["Vegetarian"] or [] if none apply.
+4. tools lists the equipment needed (e.g. "Large skillet", "Baking pan", "Mixing bowl").
+5. ingredients lists ALL ingredients needed, not just the detected ones.
+6. Every quantity MUST be a string such as "2", "1 cup", or "½ teaspoon" — never a number.
+7. EACH STEP must include the exact amount of any ingredient used in that step (e.g. "Add 2 cups of flour" NOT "Add the flour").
+8. Include cooking times, temperatures (°F), and heat levels (low / medium / high) inside the relevant step.
+9. Keep each step concise, direct, and self-contained — the user hears only one step at a time.
+10. Do NOT split one simple action into several tiny sub-steps.
+11. Use sensory cues when helpful (e.g. "until golden-brown", "until a toothpick comes out clean").
+12. Do NOT use vague instructions like "add ingredients" or "cook until done".
+
+Example of correct step format:
+"Pour 1 box of brownie mix into a large mixing bowl. Add 3 tablespoons of water, ½ cup of vegetable oil, and 2 large eggs. Stir for 1 minute until the batter is smooth with no dry powder."
+
+Example of WRONG step format (never do this):
+"Add the eggs." / "Mix the batter." / "Cook it."
 ''';
 
   Map<String, dynamic> requestBody({bool includeThinkingConfig = true}) {
@@ -308,6 +324,17 @@ Recipe _recipeFromMap(Map<String, dynamic> m, {required String id}) {
     }
   }
 
+  // ── Tools ──────────────────────────────────────────────────────────────
+  final rawTools = m['tools'];
+  final tools = <String>[];
+
+  if (rawTools is List) {
+    for (final tool in rawTools) {
+      final text = _asString(tool).trim();
+      if (text.isNotEmpty) tools.add(text);
+    }
+  }
+
   final rawDiet = m['dietaryPreferences'];
   final dietaryPrefs = <String>[];
 
@@ -334,6 +361,7 @@ Recipe _recipeFromMap(Map<String, dynamic> m, {required String id}) {
     dietaryPreferences: dietaryPrefs,
     allergens: const [],
     ingredients: ingredients,
+    tools: tools,
     steps: steps,
     isRecommended: true,
   );

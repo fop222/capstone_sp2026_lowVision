@@ -473,6 +473,7 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
   }
 
   Future<void> _signOut() async {
+    clearRecommendedRecipes(); // clear Surprise Me! recipes on logout
     await supabase.auth.signOut();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
