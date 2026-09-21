@@ -1,6 +1,7 @@
 /// Gemini API integration for the "Surprise Me!" recipe suggestion feature.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -17,9 +18,9 @@ const String kGeminiApiKey =
 
 const _kGeminiEndpoint =
     'https://generativelanguage.googleapis.com/v1beta/models/'
-    'gemini-3.6-flash:generateContent';
+    'gemini-2.5-flash:generateContent';
 
-/// Generates up to 5 recipe suggestions based on [detectedIngredients].
+/// Generates up to 2 recipe suggestions based on [detectedIngredients].
 /// Returns an empty list on any error so the caller can show a graceful message.
 Future<List<Recipe>> generateRecipeSuggestions(
   List<String> detectedIngredients,
@@ -54,14 +55,13 @@ Rules:
 - dietaryPreferences is an array of strings such as "Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free" (empty array if none apply)
 - ingredients must list ALL ingredients needed, not just the detected ones
 - steps must be complete, numbered step-by-step cooking instructions
-- Return ONLY the JSON array, nothing else
 ''';
 
-  try {
-    final uri = Uri.parse('$_kGeminiEndpoint?key=$kGeminiApiKey');
+  final uri = Uri.parse('$_kGeminiEndpoint?key=$kGeminiApiKey');
 
-    // Try up to 3 times if Gemini temporarily returns 503.
-    for (int attempt = 1; attempt <= 3; attempt++) {
+  // Try up to 3 times if Gemini times out or temporarily returns 503.
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    try {
       final response = await http
           .post(
             uri,
@@ -75,11 +75,12 @@ Rules:
                 }
               ],
               'generationConfig': {
-                'maxOutputTokens': 4096,
+                'maxOutputTokens': 2048,
+                'responseMimeType': 'application/json',
               },
             }),
           )
-          .timeout(const Duration(seconds: 120));
+          .timeout(const Duration(seconds: 90));
 
       // Successful response
       if (response.statusCode == 200) {
@@ -107,24 +108,11 @@ Rules:
           return [];
         }
 
-        // Extract the JSON array even if the model wraps it in backticks.
-        final match =
-            RegExp(r'\[[\s\S]*\]', dotAll: true).firstMatch(rawText);
+        // Parse JSON output directly
+        final list = jsonDecode(rawText) as List<dynamic>;
 
-        if (match == null) {
-          print(
-            '[Gemini] Could not find JSON array in response:\n$rawText',
-          );
-          return [];
-        }
-
-        final list = jsonDecode(match.group(0)!) as List<dynamic>;
-
-        // We asked Gemini for exactly 2 recipes.
         if (list.length != 2) {
-          print(
-            '[Gemini] Expected 2 recipes but received ${list.length}.',
-          );
+          print('[Gemini] Expected 2 recipes but received ${list.length}.');
           return [];
         }
 
@@ -142,37 +130,32 @@ Rules:
             .toList();
       }
 
-      // Gemini is temporarily unavailable.
+      // Handle 503 retries
       if (response.statusCode == 503) {
-        print(
-          '[Gemini] Service unavailable (503). '
-          'Attempt $attempt of 3.',
-        );
-
+        print('[Gemini] Service unavailable (503). Attempt $attempt of 3.');
         if (attempt < 3) {
-          // Wait 2 seconds, then 4 seconds before retrying.
-          await Future.delayed(
-            Duration(seconds: attempt * 2),
-          );
+          await Future.delayed(Duration(seconds: attempt * 2));
           continue;
         }
-
-        print('[Gemini] Failed after 3 attempts.');
-        return [];
       }
 
-      // Other API errors should not be retried.
-      print(
-        '[Gemini] HTTP ${response.statusCode}: ${response.body}',
-      );
+      print('[Gemini] HTTP ${response.statusCode}: ${response.body}');
+      return [];
+    } on TimeoutException {
+      print('[Gemini] Request timed out on attempt $attempt of 3.');
+      if (attempt < 3) {
+        await Future.delayed(Duration(seconds: attempt * 2));
+        continue;
+      }
+      print('[Gemini] All retry attempts timed out.');
+      return [];
+    } catch (e) {
+      print('[Gemini] Error: $e');
       return [];
     }
-
-    return [];
-  } catch (e) {
-    print('[Gemini] Error: $e');
-    return [];
   }
+
+  return [];
 }
 
 // ── Parser ────────────────────────────────────────────────────────────────────
