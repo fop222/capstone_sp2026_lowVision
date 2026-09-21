@@ -74,6 +74,9 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
   // ── Navigation ───────────────────────────────────────────────────────────────
 
   void _onStartCooking() {
+    // Stop prep-screen TTS before handing off to CookingModeScreen,
+    // so the Web Speech synthesis queue is clear when the new screen starts.
+    _tts.stop();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CookingModeScreen(recipe: recipe),

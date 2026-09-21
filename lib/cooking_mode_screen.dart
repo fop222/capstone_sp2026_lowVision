@@ -41,8 +41,22 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   @override
   void initState() {
     super.initState();
-    _tts.awaitSpeakCompletion(true);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _speak(_currentText));
+    // Initialise TTS engine and speak the first step.
+    // We do this asynchronously so the screen can render first, and we add
+    // a short pause so the Web Speech synthesis queue is fully settled after
+    // the prep screen's TTS has stopped.
+    _initTtsAndSpeakFirst();
+  }
+
+  Future<void> _initTtsAndSpeakFirst() async {
+    await applyEnglishTts(_tts);
+    // Give the navigation animation and the Web Speech API time to settle.
+    await Future.delayed(const Duration(milliseconds: 450));
+    if (!mounted) return;
+    await _tts.stop(); // ensure no prior utterance is queued
+    setState(() => _speaking = true);
+    await _tts.speak(_currentText);
+    if (mounted) setState(() => _speaking = false);
   }
 
   @override
@@ -55,8 +69,8 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
   Future<void> _speak(String text) async {
     if (!mounted) return;
+    await _tts.stop(); // cancel any in-progress utterance first
     setState(() => _speaking = true);
-    await applyEnglishTts(_tts);
     await _tts.speak(text);
     if (mounted) setState(() => _speaking = false);
   }
