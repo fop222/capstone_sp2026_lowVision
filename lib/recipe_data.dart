@@ -114,6 +114,14 @@ const List<Recipe> kAllRecipes = [
       'Knife',
       'Cutting board',
     ],
+    steps: [
+      'Rinse 1/4 cup of strawberries and 1/4 cup of blueberries under cool running water and pat dry.',
+      'On a cutting board, use a knife to remove the green tops from the strawberries, then slice them into bite-sized pieces.',
+      'Scoop 1 cup of yogurt into a bowl or glass and spread it evenly across the bottom.',
+      'Sprinkle 1/2 cup of granola evenly over the yogurt.',
+      'Scatter the sliced strawberries and 1/4 cup of blueberries on top of the granola.',
+      'Drizzle 1 tablespoon of honey over the fruit and serve immediately.',
+    ],
   ),
 
   Recipe(
@@ -143,6 +151,14 @@ const List<Recipe> kAllRecipes = [
       'Spatula',
       'Ladle or measuring cup for pouring batter',
     ],
+    steps: [
+      'In a large mixing bowl, whisk together 1 cup of all-purpose flour, 2 teaspoons of baking powder, 2 tablespoons of sugar, and 1/4 teaspoon of salt.',
+      'Melt 2 tablespoons of butter. Add it to the dry ingredients along with 1 cup of milk and 1 egg. Stir until just combined — a few small lumps are fine. Do not over-mix.',
+      'Heat a frying pan or griddle over medium heat until a drop of water flicked onto it sizzles immediately.',
+      'Pour about 1/4 cup of batter per pancake onto the pan. Cook for 2 to 3 minutes until bubbles form across the surface and the edges look set.',
+      'Flip each pancake with the spatula and cook for 1 to 2 more minutes until the bottom is golden-brown.',
+      'Repeat with the remaining batter. Serve warm with maple syrup.',
+    ],
   ),
 
   Recipe(
@@ -166,6 +182,13 @@ const List<Recipe> kAllRecipes = [
       'Frying pan',
       'Spatula',
       'Measuring spoon',
+    ],
+    steps: [
+      'Crack 3 eggs into a bowl. Add 2 tablespoons of milk or water, a pinch of salt, and a pinch of pepper. Beat with a fork or whisk until the yolks and whites are fully combined.',
+      'Place a frying pan over low-to-medium heat. Add 1 tablespoon of butter or oil and let it melt, tilting the pan to coat the bottom.',
+      'Pour the egg mixture into the pan. Let it sit for about 20 seconds until the edges just begin to set.',
+      'Using the spatula, gently push the eggs from the edges toward the center. Continue folding every 20 to 30 seconds, keeping the heat low.',
+      'Remove the pan from heat when the eggs are just barely set — they will finish cooking from the residual heat. Serve immediately.',
     ],
   ),
 
@@ -196,6 +219,14 @@ const List<Recipe> kAllRecipes = [
       'Plate',
       'Bowl',
     ],
+    steps: [
+      'Pour 1 can of condensed tomato soup and 1 1/2 cups of water into a medium saucepan. Stir to combine and place over medium heat.',
+      'Heat the soup, stirring occasionally, for about 5 minutes until hot and steaming. Reduce to low heat to keep warm.',
+      'Spread 1 tablespoon of butter evenly on one side of each bread slice.',
+      'Heat a medium frying pan over medium heat. Place one bread slice butter-side down in the pan. Lay 2 slices of cheese on top, then place the second bread slice on top with the butter-side facing up.',
+      'Cook for 2 to 3 minutes until the bottom is golden-brown. Flip with the spatula and cook the other side for 2 to 3 more minutes until golden-brown and the cheese is melted.',
+      'Transfer the grilled cheese to a plate. Ladle the hot soup into a bowl. Serve together.',
+    ],
   ),
 
   Recipe(
@@ -221,6 +252,14 @@ const List<Recipe> kAllRecipes = [
       'Plate',
       'Knife and cutting board',
       'Lid or foil',
+    ],
+    steps: [
+      'Heat a heavy skillet or grill over medium-high heat. If needed, add 1 teaspoon of cooking oil and let it heat for 1 minute.',
+      'Place 1 frozen burger patty directly on the hot surface. Season the top with salt and pepper if desired.',
+      'Cook for 4 to 5 minutes without pressing down, until the edges turn gray and the underside is browned. Flip with the spatula.',
+      'Cook the second side for 4 to 5 minutes until the patty is fully cooked through with no pink in the center. In the final minute, place 1 slice of cheese on top and cover with a lid or foil to melt.',
+      'Remove the patty from heat and let it rest on a plate for 1 minute.',
+      'Place the patty on the bottom half of the hamburger bun. Add any toppings you like and condiments as desired. Place the top bun on and serve.',
     ],
   ),
 
@@ -253,6 +292,15 @@ const List<Recipe> kAllRecipes = [
       'Rolling pin, optional',
       'Oven mitts',
     ],
+    steps: [
+      'Preheat the oven to 450°F.',
+      'In a small mixing bowl, whisk together 1 can (6 ounces) of tomato paste, 1 1/2 cups of water, 4 chopped garlic cloves, 1/4 cup of olive oil, 1/4 teaspoon of salt, and 1/4 teaspoon of black pepper until smooth.',
+      'On a baking sheet or pizza pan, stretch or roll out 1 pound (16 ounces) of pizza dough to your desired thickness.',
+      'Spread the sauce evenly over the dough, leaving a 1/2-inch border around the edge.',
+      'Tear 1/2 pound of fresh mozzarella into pieces and scatter over the sauce. Sprinkle 1 teaspoon of sesame seeds along the crust edge.',
+      'Bake for 12 to 15 minutes until the crust is golden-brown and the cheese is bubbling. Use oven mitts to remove from the oven.',
+      'Scatter 1/2 cup of fresh basil leaves over the hot pizza, slice, and serve.',
+    ],
   ),
 
   Recipe(
@@ -274,6 +322,13 @@ const List<Recipe> kAllRecipes = [
       'Large skillet or wok',
       'Spatula or wooden spoon',
       'Measuring cups and spoons',
+    ],
+    steps: [
+      'Heat a large skillet or wok over high heat. Add 2 tablespoons of cooking oil and let it heat for 1 minute until shimmering.',
+      'Add 1 cup of frozen peas and carrots to the hot oil. Stir-fry for 2 minutes until thawed and starting to brown at the edges.',
+      'Push the vegetables to one side of the pan. Crack 2 eggs into the empty side and scramble with the spatula for about 1 minute until just set, then mix into the vegetables.',
+      'Add 3 cups of cold cooked rice. Press it against the hot surface and cook undisturbed for 1 minute to lightly toast the bottom, then stir everything together.',
+      'Drizzle 1 to 2 tablespoons of soy sauce over the rice. Stir-fry for 1 to 2 more minutes until evenly coated and heated through. Serve immediately.',
     ],
   ),
 
@@ -310,6 +365,14 @@ const List<Recipe> kAllRecipes = [
       'Wooden spoon',
       'Grater',
     ],
+    steps: [
+      'Bring a small pot of salted water to a boil over high heat. Add 3/4 cup of dry spaghetti and cook for 8 to 10 minutes, or until al dente. Drain in a colander and set aside.',
+      'While the pasta cooks, heat 1/2 tablespoon of olive oil in a small skillet over medium-high heat. Add 1/3 cup of lean ground meat and cook, breaking it up with a wooden spoon, for 4 to 5 minutes until browned.',
+      'Add 2 tablespoons plus 1 teaspoon of chopped onion to the skillet. Cook for 3 minutes until softened, then add 1/2 teaspoon of minced garlic and cook for 1 more minute.',
+      'Stir in 1 tablespoon of tomato paste, 1/4 teaspoon of dried oregano, and a tiny pinch of crushed red pepper flakes. Add 2 1/2 tablespoons of water, broth, or red wine and stir to combine.',
+      'Add 2/3 cup of crushed tomatoes, 1/4 teaspoon of salt, and black pepper to taste. Stir well and simmer on low heat for 5 minutes, stirring occasionally.',
+      'Add the drained spaghetti to the sauce and toss until evenly coated. Serve topped with 2 torn fresh basil leaves and grated Parmesan cheese.',
+    ],
   ),
 
   // ── DESSERTS ─────────────────────────────────────────────────────────────
@@ -344,6 +407,16 @@ const List<Recipe> kAllRecipes = [
       'Oven mitts',
       'Plate',
     ],
+    steps: [
+      'Preheat the oven to 375°F.',
+      'Let 1 cup (2 sticks) of butter soften to room temperature. In a large mixing bowl, beat the butter with 3/4 cup of granulated sugar and 3/4 cup of packed brown sugar until light and fluffy, about 2 minutes.',
+      'Add 2 large eggs and 1 teaspoon of vanilla extract. Mix until smooth.',
+      'Stir in 2 1/4 cups of all-purpose flour, 1 teaspoon of baking soda, and 1 teaspoon of salt until just combined — do not over-mix.',
+      'Fold in 2 cups of semi-sweet chocolate chips.',
+      'Drop rounded tablespoons of dough about 2 inches apart on an ungreased baking sheet.',
+      'Bake for 9 to 11 minutes until the edges are golden-brown but the centers still look slightly soft.',
+      'Use oven mitts to remove the baking sheet. Let the cookies cool on the sheet for 5 minutes, then transfer to a plate.',
+    ],
   ),
 
   Recipe(
@@ -370,6 +443,15 @@ const List<Recipe> kAllRecipes = [
       'Toothpick',
       'Heat-safe surface',
       'Knife',
+    ],
+    steps: [
+      'Preheat the oven to 350°F.',
+      'Pour 1 box of brownie mix into a large mixing bowl.',
+      'Add 3 tablespoons of water, 1/2 cup of vegetable oil, and 2 eggs. Stir with a spoon for about 1 minute until the batter is thick and smooth with no dry powder remaining.',
+      'Pour the batter into a 13-by-9-inch baking pan and spread it evenly with the spoon.',
+      'Bake for 28 to 31 minutes. Insert a toothpick into the center — it is done when the toothpick comes out with a few moist crumbs, not wet batter.',
+      'Use oven mitts to remove the pan from the oven. Set it on a heat-safe surface and let it cool for at least 15 minutes.',
+      'Use a knife to cut the brownies into squares and serve.',
     ],
   ),
 ];
