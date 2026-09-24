@@ -39,6 +39,7 @@ YOLO_MODEL_PATH = os.environ.get("YOLO_MODEL_PATH", "best.pt")
 
 # If 1, include traceback in JSON errors (dev only)
 RETURN_TRACEBACK = os.environ.get("RETURN_TRACEBACK", "0") == "1"
+DEBUG_VLM_LOGS = os.environ.get("DEBUG_VLM_LOGS", "0") == "1"
 
 # Load EasyOCR once (default: CPU to preserve VRAM for VLM)
 reader = easyocr.Reader(["en"], gpu=False)
@@ -372,6 +373,8 @@ def predict():
         "Do NOT output JSON unless explicitly requested. "
         "Follow this format strictly."
     )
+    if DEBUG_VLM_LOGS:
+        print("[pantry-debug] exact prompt:\n" + question)
 
     filename = secure_filename(file.filename or "vlm.png")
     filepath = UPLOAD_FOLDER / filename
@@ -379,6 +382,8 @@ def predict():
 
     try:
         answer = infer_with_vlm(filepath, question)
+        if DEBUG_VLM_LOGS:
+            print("[pantry-debug] raw VLM response:\n" + answer)
         if not answer:
             return jsonify({
                 "image_path": str(filepath),

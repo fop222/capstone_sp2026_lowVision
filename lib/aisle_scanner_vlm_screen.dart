@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -19,6 +19,7 @@ import 'app_voice_policy.dart';
 import 'grocery_list_detail_screen.dart';
 import 'main.dart';
 import 'ocr_config.dart';
+import 'pantry_item_normalization.dart';
 import 'shopping_voice_host.dart';
 
 class _Item {
@@ -773,6 +774,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     required String question,
   }) async {
     try {
+      if (kDebugMode) debugPrint('[pantry-debug] exact prompt:\n$question');
       final req = http.MultipartRequest('POST', vlmPredictUri())
         ..files.add(
           http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'),
@@ -798,6 +800,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
       final decoded = json.decode(body) as Map<String, dynamic>;
       final answer = (decoded['answer'] as String? ?? '').trim();
+      if (kDebugMode) debugPrint('[pantry-debug] raw VLM response:\n$answer');
       return answer.isEmpty ? 'No description returned.' : answer;
     } catch (e) {
       return 'Grocery scan request failed: $e';
@@ -1196,11 +1199,21 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     }
 
     final found = <_Item>[];
+    final normalizedTargets = <_Item, String>{
+      for (final target in targets) target: normalizePantryFoodName(target.name),
+    };
+    if (kDebugMode) {
+      debugPrint('[pantry-debug] parsed detected items: $answer');
+      debugPrint(
+        '[pantry-debug] normalized shopping-list items: '
+        '${normalizedTargets.map((item, name) => MapEntry(item.name, name))}',
+      );
+    }
     final lines = answer
         .split(RegExp(r'\r?\n'))
         .map((l) => l.trim())
         // Drop empty lines and lines that look like preamble/explanation text
-        .where((l) => l.isNotEmpty && !l.endsWith(':') && !l.startsWith('-'));
+        .where((l) => l.isNotEmpty && !l.endsWith(':'));
 
     for (final line in lines) {
       // Parse "ItemName | region" format (region is optional for robustness).
@@ -1218,22 +1231,27 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       final cleaned = itemText.replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), '');
       if (cleaned.isEmpty) continue;
 
-      for (final target in targets) {
-        if (found.contains(target)) continue;
-        final tLow = target.name.toLowerCase();
-        final dLow = cleaned.toLowerCase();
-        // Substring match (handles "Greek Yogurt" matching target "Yogurt", etc.)
-        if (dLow.contains(tLow) || tLow.contains(dLow)) {
-          found.add(target);
-          if (location.isNotEmpty) _lastPantryLocations[target.id] = location;
-          continue;
-        }
-        // Fallback: existing token-level fuzzy helper
-        if (_vlmAnswerMatchesTarget(cleaned, target)) {
-          found.add(target);
-          if (location.isNotEmpty) _lastPantryLocations[target.id] = location;
+      final normalizedDetected = normalizePantryFoodName(cleaned);
+      final candidates = targets
+          .where((target) => normalizedTargets[target] == normalizedDetected)
+          .toList();
+      if (kDebugMode) {
+        debugPrint(
+          '[pantry-debug] detected="$cleaned" normalized="$normalizedDetected" '
+          'candidates=${candidates.map((item) => item.name).toList()}',
+        );
+        if (candidates.length != 1) {
+          debugPrint('[pantry-debug] rejected candidate: $cleaned');
         }
       }
+      // Do not choose arbitrarily when two unchecked entries normalize alike.
+      if (candidates.length != 1 || found.contains(candidates.single)) continue;
+      final target = candidates.single;
+      found.add(target);
+      if (location.isNotEmpty) _lastPantryLocations[target.id] = location;
+    }
+    if (kDebugMode) {
+      debugPrint('[pantry-debug] final matches: ${found.map((i) => i.name).toList()}');
     }
     return found;
   }
@@ -1433,6 +1451,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
     final shelfText = await _runOcr(bytes);
     final targets = _uncheckedPendingShelfItems;
+    if (kDebugMode) {
+      debugPrint(
+        '[pantry-debug] unchecked list items sent to backend: '
+        '${targets.map((item) => item.name).toList()}',
+      );
+    }
     final singleTarget = targets.length == 1 ? targets.first : null;
 
     String question;
