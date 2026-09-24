@@ -114,6 +114,9 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
   }
 
   Future<void> _speakPrep() async {
+    // Mark busy immediately — applyEnglishTts can take ~700 ms on web and
+    // the toggle must be disabled during that window.
+    if (mounted) setState(() => _speaking = true);
     await applyEnglishTts(_tts);
 
     final ingNames = recipe.ingredients.map((i) => i.name).toList();

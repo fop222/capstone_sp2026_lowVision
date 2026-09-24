@@ -79,6 +79,8 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   }
 
   Future<void> _initAndStart() async {
+    // Mark busy immediately so the toggle is disabled during TTS init.
+    if (mounted) setState(() => _speaking = true);
     await applyEnglishTts(_tts);
     // Let the navigation animation settle and the Web Speech queue clear.
     await Future.delayed(const Duration(milliseconds: 450));
@@ -94,9 +96,11 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (!mounted) return;
 
     if (_handsFree) {
+      // _runHandsFreeStep will re-set _speaking; clear it first so the
+      // speaking=true from init doesn't linger through the gen check.
+      setState(() => _speaking = false);
       _runHandsFreeStep();
     } else {
-      setState(() => _speaking = true);
       await _tts.speak(_currentText);
       if (mounted) setState(() => _speaking = false);
     }
@@ -283,8 +287,11 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (!mounted || !_handsFree) return;
 
     final gen = ++_hfGen;
+    // Set _speaking = true immediately so the toggle is disabled for the
+    // entire cycle, including the tts.stop() / ensureInit gaps.
     if (mounted) {
       setState(() {
+        _speaking = true;
         _timedOut = false;
         _waitingConfirm = false;
         _listenTranscript = '';
@@ -293,7 +300,10 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
     // Cancel any lingering TTS from a prior call.
     await _tts.stop();
-    if (!_stillActive(gen)) return;
+    if (!_stillActive(gen)) {
+      if (mounted) setState(() => _speaking = false);
+      return;
+    }
 
     // 1 ── Speak the current step.
     if (mounted) setState(() => _speaking = true);
