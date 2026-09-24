@@ -2019,19 +2019,21 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             await _speak('What item are you feeling?');
             if (!ctx.mounted) return;
 
-            transcript = await _listenForSpokenAislePhrase(
-              onPartial: (p) {
-                if (ctx.mounted) setModal(() => partial = p);
-              },
-              pauseFor: const Duration(seconds: 3),
-            );
-            if (!ctx.mounted) return;
+            // Keep listening until actual words are captured.
+            var heard = '';
+            while (heard.isEmpty) {
+              if (!ctx.mounted) return;
+              setModal(() { partial = ''; transcript = ''; });
 
-            final heard = transcript.trim();
-            if (heard.isEmpty) {
-              setModal(() => phase = _TactileDialogPhase.prompt);
-              await _speak('I did not hear anything. Please try again.');
-              return;
+              transcript = await _listenForSpokenAislePhrase(
+                onPartial: (p) {
+                  if (ctx.mounted) setModal(() => partial = p);
+                },
+                pauseFor: const Duration(seconds: 3),
+              );
+              if (!ctx.mounted) return;
+              heard = transcript.trim();
+              // If still nothing, loop silently — no error message.
             }
 
             final unchecked = _uncheckedPendingShelfItems;
