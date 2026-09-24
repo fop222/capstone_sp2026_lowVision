@@ -56,7 +56,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   // HF phase indicators (all false when HF is off or idle)
   bool _listening = false;
   bool _waitingConfirm = false;
-  bool _timedOut = false; // last listen attempt timed out with no speech
   String _listenTranscript = ''; // live partial transcript shown on screen
 
   /// Incremented on every new HF cycle or manual navigation. Async callbacks
@@ -134,7 +133,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
         _speaking = false;
         _listening = false;
         _waitingConfirm = false;
-        _timedOut = false;
         _listenTranscript = '';
       });
     }
@@ -292,7 +290,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (mounted) {
       setState(() {
         _speaking = true;
-        _timedOut = false;
         _waitingConfirm = false;
         _listenTranscript = '';
       });
@@ -333,51 +330,41 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     await _runListenCycle(gen);
   }
 
-  /// Listens for a response and handles yes / no / unclear / timeout.
-  /// Calls itself recursively on "unclear" (same [gen], no extra step
-  /// increment).
+  /// Listens for a response in a loop — if no speech is detected, listening
+  /// restarts automatically until the user speaks or manually navigates away.
   Future<void> _runListenCycle(int gen) async {
-    if (!_stillActive(gen)) return;
+    while (_stillActive(gen)) {
+      if (mounted) setState(() => _waitingConfirm = true);
 
-    final heard = await _listenForHFResponse(gen);
-    if (!_stillActive(gen)) return;
+      final heard = await _listenForHFResponse(gen);
+      if (!_stillActive(gen)) return;
 
-    if (mounted) setState(() => _waitingConfirm = false);
+      if (mounted) setState(() => _waitingConfirm = false);
 
-    if (heard.isEmpty) {
-      // Timeout — no speech detected.  Show manual buttons without speaking
-      // again (the silence is obvious to sighted users; a message would be
-      // distracting for users who are still cooking).
-      if (mounted) setState(() => _timedOut = true);
-      return;
-    }
+      // No speech detected → restart listening silently (no message).
+      if (heard.isEmpty) continue;
 
-    final verdict = _classifyResponse(heard);
-    switch (verdict) {
-      case _HFVerdict.yes:
-        if (!mounted || !_handsFree || _hfGen != gen) return;
-        setState(() {
-          _step++;
-          _timedOut = false;
-        });
-        // Fire-and-forget so _runListenCycle can return cleanly.
-        _runHandsFreeStep();
+      final verdict = _classifyResponse(heard);
+      switch (verdict) {
+        case _HFVerdict.yes:
+          setState(() => _step++);
+          _runHandsFreeStep(); // fire-and-forget
+          return;
 
-      case _HFVerdict.no:
-        if (!mounted || !_handsFree || _hfGen != gen) return;
-        setState(() => _timedOut = false);
-        _runHandsFreeStep(); // repeats the same step
+        case _HFVerdict.no:
+          _runHandsFreeStep(); // repeat same step
+          return;
 
-      case _HFVerdict.unclear:
-        if (mounted) setState(() => _speaking = true);
-        await _tts.speak(
-          "I didn't catch that. "
-          "Say yes to continue or no to hear the step again.",
-        );
-        if (mounted) setState(() => _speaking = false);
-        if (!_stillActive(gen)) return;
-        if (mounted) setState(() => _waitingConfirm = true);
-        await _runListenCycle(gen); // retry same step, same gen
+        case _HFVerdict.unclear:
+          if (mounted) setState(() => _speaking = true);
+          await _tts.speak(
+            "I didn't catch that. "
+            "Say yes to continue or no to hear the step again.",
+          );
+          if (mounted) setState(() => _speaking = false);
+          if (!_stillActive(gen)) return;
+          // Loop continues — listen again for the same step.
+      }
     }
   }
 
@@ -387,10 +374,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (_step == 0) return;
     await _cancelVoice();
     if (!mounted) return;
-    setState(() {
-      _step--;
-      _timedOut = false;
-    });
+    setState(() => _step--);
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
@@ -405,10 +389,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     }
     await _cancelVoice();
     if (!mounted) return;
-    setState(() {
-      _step++;
-      _timedOut = false;
-    });
+    setState(() => _step++);
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
@@ -419,7 +400,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   Future<void> _onRepeat() async {
     await _cancelVoice();
     if (!mounted) return;
-    setState(() => _timedOut = false);
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
@@ -449,33 +429,13 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     }
   }
 
-  /// Restart voice listening after a timeout, without re-reading the step.
-  Future<void> _onListenAgain() async {
-    if (!_handsFree) return;
-    await _cancelVoice();
-    if (!mounted) return;
-
-    final gen = ++_hfGen;
-    setState(() {
-      _timedOut = false;
-      _waitingConfirm = true;
-    });
-
-    if (mounted) setState(() => _speaking = true);
-    await _tts.speak('Are you ready to move on?');
-    if (mounted) setState(() => _speaking = false);
-    if (!_stillActive(gen)) return;
-
-    await _runListenCycle(gen);
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bool isIdle =
-        !_speaking && !_listening && !_waitingConfirm && !_timedOut;
+        !_speaking && !_listening && !_waitingConfirm;
 
     return Scaffold(
       appBar: AppBar(
@@ -556,7 +516,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                       speaking: _speaking,
                       listening: _listening,
                       waitingConfirm: _waitingConfirm,
-                      timedOut: _timedOut,
                       transcript: _listenTranscript,
                       handsFree: _handsFree,
                       speechAvailable: _speechAvailable,
@@ -602,61 +561,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
                     const SizedBox(height: 8),
 
-                    // ── Timeout prompt: extra CTA row ─────────────────
-                    if (_timedOut && _handsFree) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: Colors.amber.withValues(alpha: 0.4)),
-                        ),
-                        child: const Text(
-                          'No response heard. Tap "Try Again" or use the buttons below.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              color: Colors.amber,
-                              fontSize: 16,
-                              height: 1.4),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _CookingButton(
-                              label: 'Repeat Step',
-                              icon: Icons.replay_rounded,
-                              onTap: _onRepeat,
-                              outlined: true,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _CookingButton(
-                              label: 'Try Again',
-                              icon: Icons.mic_rounded,
-                              onTap: _onListenAgain,
-                              outlined: true,
-                              accent: const Color(0xFF3AE4C2),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _CookingButton(
-                              label: 'Continue',
-                              icon: Icons.arrow_forward_rounded,
-                              onTap: _isLast ? _onFinish : _onNext,
-                              filled: true,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-
                     // ── Primary action buttons ────────────────────────
                     Row(
                       children: [
@@ -673,22 +577,19 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                           ),
                           const SizedBox(width: 10),
                         ],
-                        // Repeat — hidden while the timeout row is shown
-                        // (which already has a Repeat Step button)
-                        if (!(_timedOut && _handsFree)) ...[
-                          Expanded(
-                            child: _CookingButton(
-                              label: 'Repeat',
-                              icon: Icons.replay_rounded,
-                              onTap: isIdle ? _onRepeat : null,
-                              outlined: true,
-                            ),
+                        // Repeat
+                        Expanded(
+                          child: _CookingButton(
+                            label: 'Repeat',
+                            icon: Icons.replay_rounded,
+                            onTap: isIdle ? _onRepeat : null,
+                            outlined: true,
                           ),
-                          const SizedBox(width: 14),
-                        ],
+                        ),
+                        const SizedBox(width: 14),
                         // Next / Finish
                         Expanded(
-                          flex: (_timedOut && _handsFree) ? 1 : 2,
+                          flex: 2,
                           child: _CookingButton(
                             label: _isLast
                                 ? 'Finish Cooking'
@@ -696,9 +597,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                             icon: _isLast
                                 ? Icons.check_circle_outline_rounded
                                 : Icons.arrow_forward_rounded,
-                            onTap: (isIdle || _timedOut)
-                                ? _onNext
-                                : null,
+                            onTap: isIdle ? _onNext : null,
                             filled: true,
                             accent: _isLast
                                 ? const Color(0xFF4DEBA0)
@@ -806,7 +705,6 @@ class _HFStatusBar extends StatelessWidget {
     required this.speaking,
     required this.listening,
     required this.waitingConfirm,
-    required this.timedOut,
     required this.transcript,
     required this.handsFree,
     required this.speechAvailable,
@@ -815,14 +713,12 @@ class _HFStatusBar extends StatelessWidget {
   final bool speaking;
   final bool listening;
   final bool waitingConfirm;
-  final bool timedOut;
   final String transcript;
   final bool handsFree;
   final bool speechAvailable;
 
   @override
   Widget build(BuildContext context) {
-    // Build the appropriate message; return nothing if fully idle.
     IconData? icon;
     String? text;
     Color color = Colors.white60;
@@ -837,7 +733,7 @@ class _HFStatusBar extends StatelessWidget {
           ? 'Listening for yes or no…'
           : 'Heard: "$transcript"';
       color = const Color(0xFF3AE4C2);
-    } else if (waitingConfirm && !timedOut) {
+    } else if (waitingConfirm) {
       icon = Icons.hourglass_top_rounded;
       text = 'Waiting for your response…';
       color = Colors.white54;
@@ -847,7 +743,6 @@ class _HFStatusBar extends StatelessWidget {
           'Microphone unavailable — use the buttons to navigate.';
       color = Colors.orange;
     } else {
-      // Idle — no bar needed.
       return const SizedBox.shrink();
     }
 
