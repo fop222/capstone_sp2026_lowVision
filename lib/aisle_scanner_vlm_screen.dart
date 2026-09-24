@@ -350,11 +350,12 @@ const _kShelfSceneGatePreamble =
     'respond with exactly this single line and nothing else: NO ITEMS FOUND\n'
     'If it does show appropriate shelving, continue:\n';
 
-/// Gate preamble for Pantry / Fridge mode — accepts home storage (fridge shelves,
-/// pantry shelves, kitchen cabinets) instead of insisting on a retail store shelf.
+/// Gate preamble for Pantry / Fridge mode — accepts home storage and close-up
+/// photos of loose or bagged food instead of requiring a retail store shelf.
 const _kPantrySceneGatePreamble =
-    'First, decide whether this photo clearly shows food items, beverages, or grocery products '
-    'stored on shelves, in a refrigerator, or in a pantry / kitchen cabinet. '
+    'First, decide whether this photo clearly shows food items, beverages, grocery products, '
+    'or a close-up of produce being photographed for a pantry or refrigerator check. '
+    'Accept produce inside clear or translucent plastic bags even when no shelf is visible. '
     'If it shows anything completely unrelated to food storage (such as a vehicle interior, '
     'outdoor scenery, people, pets, or a completely empty surface with no products), '
     'respond with exactly this single line and nothing else: NO ITEMS FOUND\n'
@@ -1440,8 +1441,25 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       question =
           gatePreamble +
           'Look carefully at this photo of a refrigerator, pantry, or kitchen cabinet. '
-          'List ONLY the food items you can clearly and certainly identify in the image. '
-          'Be very conservative — if you are not 100%% sure what an item is, do NOT list it. '
+          'Identify food from the actual visible contents, not primarily from OCR, packaging, '
+          'brand names, printed words, logos, or a printed picture on the package. '
+          'For produce inside clear or translucent plastic, look through the bag and examine '
+          'the produce itself: its shape, color, texture, leaves, stems, roots, and other '
+          'physical features. A readable label may support visual evidence, but a label alone '
+          'is never enough. The item must still be visibly consistent with the label. '
+          'Recognize bagged produce when its label is missing, covered, incorrect, unreadable, '
+          'or facing away from the camera. Useful visual cues include broad ruffled leaves for '
+          'lettuce; long pale-green ribbed stalks for celery; round or oval tan, red, or gold '
+          'tubers for potatoes; pale spoon-shaped stems with dark-green leaves for bok choy; '
+          'long tapered orange roots for carrots; and smooth glossy lobed green, red, yellow, '
+          'or orange bodies for bell peppers. These cues are guidance only—do not report an '
+          'item unless those physical features are reasonably visible in this image. '
+          'List ONLY food items you can identify with reasonable visual confidence. Omit any '
+          'uncertain item instead of guessing. If no food item is visually clear enough, write '
+          'exactly NONE so the user will be asked to rescan. '
+          'Return only a short general food name such as Lettuce, Celery, Potatoes, Bok Choy, '
+          'Carrots, or Bell Peppers. Never return a brand, slogan, package description, label '
+          'text, variety marketing name, or full product title. '
           'For each item write one line in this exact format:  ItemName | region\n'
           'Use one of these nine regions to describe roughly where the item appears:\n'
           '  top left, top, top right, middle left, middle, middle right, bottom left, bottom, bottom right\n'
