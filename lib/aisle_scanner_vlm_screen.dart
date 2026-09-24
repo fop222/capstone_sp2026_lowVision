@@ -1881,10 +1881,16 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     return '$donePart, $remPart.';
   }
 
-  /// Fuzzy-matches a spoken [heard] phrase against [candidates] by normalising
-  /// both sides (lower-case, strip punctuation, stem plural 's'/'es') and
-  /// checking exact equality, substring containment, and token overlap.
-  /// Reuses the existing [_vlmAnswerMatchesTarget] tokeniser as a final pass.
+  /// Fuzzy-matches a spoken [heard] phrase against [candidates].
+  ///
+  /// Matching strategy (first hit wins for each item):
+  ///  1. Exact equality or full substring in either direction.
+  ///  2. Plural / singular stem ±'s' / ±'es'.
+  ///  3. Any token from the **item name** (≥ 3 chars) found anywhere in the
+  ///     full heard string — handles "gibberish pepper gibberish" → pepper.
+  ///  4. Any token from the **heard string** (≥ 3 chars) found anywhere in
+  ///     the item name — handles partial speech like "pepp" or "chees".
+  ///  5. Final pass: existing VLM fuzzy helper (_vlmAnswerMatchesTarget).
   List<_Item> _matchSpokenToItems(String heard, List<_Item> candidates) {
     String norm(String s) => s
         .toLowerCase()
@@ -1895,31 +1901,63 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final h = norm(heard);
     if (h.isEmpty) return [];
 
+    final heardTokens = h.split(' ').where((t) => t.length >= 3).toList();
+
     final results = <_Item>[];
     for (final item in candidates) {
       if (results.contains(item)) continue;
       final t = norm(item.name);
       if (t.isEmpty) continue;
 
-      // Exact or substring
+      // 1. Exact or full substring
       if (h == t || h.contains(t) || t.contains(h)) {
         results.add(item);
         continue;
       }
-      // Plural/singular: add or remove trailing 's' / 'es'
+
+      // 2. Plural / singular
       if ('${h}s' == t || h == '${t}s' || '${h}es' == t || h == '${t}es') {
         results.add(item);
         continue;
       }
-      // Token-level: any heard token ≥ 4 chars that overlaps with item name
-      for (final token in h.split(' ')) {
-        if (token.length >= 4 && (t.contains(token) || token.contains(t))) {
+
+      // 3. Any item-name token (≥ 3 chars) present anywhere in heard string
+      bool matched = false;
+      for (final itemToken in t.split(' ')) {
+        if (itemToken.length >= 3 && h.contains(itemToken)) {
           results.add(item);
+          matched = true;
+          break;
+        }
+        // Also check plural/singular of item token
+        if (itemToken.length >= 3 &&
+            (h.contains('${itemToken}s') || h.contains('${itemToken}es'))) {
+          results.add(item);
+          matched = true;
           break;
         }
       }
-      // Final pass: reuse existing VLM fuzzy helper
-      if (!results.contains(item) && _vlmAnswerMatchesTarget(heard, item)) {
+      if (matched) continue;
+
+      // 4. Any heard token (≥ 3 chars) present anywhere in item name
+      for (final hToken in heardTokens) {
+        if (t.contains(hToken)) {
+          results.add(item);
+          matched = true;
+          break;
+        }
+        // Plural/singular of heard token
+        if (t.contains('${hToken}s') || t.contains('${hToken}es') ||
+            '${t}s'.contains(hToken) || '${t}es'.contains(hToken)) {
+          results.add(item);
+          matched = true;
+          break;
+        }
+      }
+      if (matched) continue;
+
+      // 5. Final pass: existing VLM fuzzy helper
+      if (_vlmAnswerMatchesTarget(heard, item)) {
         results.add(item);
       }
     }
