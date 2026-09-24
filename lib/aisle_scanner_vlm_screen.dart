@@ -574,10 +574,19 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     }
   }
 
-  /// Listens for an aisle name until **Stop listening** is tapped (or the
-  /// platform ends the session / listenFor timeout). [pauseFor] stays null.
+  /// Listens for a spoken phrase.
+  ///
+  /// [pauseFor] — if supplied, listening auto-stops after this period of
+  /// silence (useful for the tactile dialog where the user says one item name).
+  /// Leave null (the default) for the aisle-name flow where the user may take
+  /// their time spelling out a word or pausing between words.
+  ///
+  /// Critical: we never overwrite [recognized] with an empty string, so the
+  /// last non-empty words the user said are always returned even if the STT
+  /// engine fires a trailing empty final event.
   Future<String> _listenForSpokenAislePhrase({
     void Function(String partial)? onPartial,
+    Duration? pauseFor,
   }) async {
     if (!_speechAvailable) return '';
 
@@ -599,16 +608,23 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       try {
         await AppSpeech.I.stt.listen(
           onResult: (result) {
-            recognized = result.recognizedWords;
-            if (recognized.isNotEmpty) {
+            // Guard: never overwrite a good result with an empty string.
+            // Web STT sometimes fires a trailing final event with no words
+            // after the user pauses; ignoring it keeps the partial visible.
+            if (result.recognizedWords.isNotEmpty) {
+              recognized = result.recognizedWords;
               onPartial?.call(recognized);
             }
           },
-          listenFor: const Duration(minutes: 30),
-          pauseFor: null,
+          listenFor: pauseFor != null
+              ? const Duration(seconds: 20)
+              : const Duration(minutes: 30),
+          pauseFor: pauseFor,
           localeId: englishSpeechToTextLocaleId(),
           listenOptions: SpeechListenOptions(
-            listenMode: ListenMode.dictation,
+            listenMode: pauseFor != null
+                ? ListenMode.confirmation
+                : ListenMode.dictation,
             partialResults: true,
             cancelOnError: false,
           ),
@@ -2007,6 +2023,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
               onPartial: (p) {
                 if (ctx.mounted) setModal(() => partial = p);
               },
+              pauseFor: const Duration(seconds: 3),
             );
             if (!ctx.mounted) return;
 
