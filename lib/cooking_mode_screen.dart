@@ -164,6 +164,10 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       await Future.delayed(
           Duration(milliseconds: kIsWeb ? 700 : 300));
     }
+    // Always give a short startup delay so the browser mic is ready and
+    // the user has a moment to prepare before the silence clock starts.
+    await Future.delayed(
+        Duration(milliseconds: kIsWeb ? 1200 : 500));
     if (!_stillActive(gen)) return '';
 
     var recognized = '';
@@ -181,8 +185,8 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
           recognized = result.recognizedWords;
           setState(() => _listenTranscript = recognized);
         },
-        listenFor: const Duration(seconds: 15),
-        pauseFor: const Duration(seconds: 4),
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 10),
         localeId: englishSpeechToTextLocaleId(),
         listenOptions: SpeechListenOptions(
           listenMode: ListenMode.confirmation,
@@ -659,21 +663,22 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                           ),
                           const SizedBox(width: 10),
                         ],
-                        // Repeat
-                        Expanded(
-                          child: _CookingButton(
-                            label: 'Repeat',
-                            icon: Icons.replay_rounded,
-                            onTap: (isIdle || _timedOut)
-                                ? _onRepeat
-                                : null,
-                            outlined: true,
+                        // Repeat — hidden while the timeout row is shown
+                        // (which already has a Repeat Step button)
+                        if (!(_timedOut && _handsFree)) ...[
+                          Expanded(
+                            child: _CookingButton(
+                              label: 'Repeat',
+                              icon: Icons.replay_rounded,
+                              onTap: isIdle ? _onRepeat : null,
+                              outlined: true,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 14),
+                          const SizedBox(width: 14),
+                        ],
                         // Next / Finish
                         Expanded(
-                          flex: 2,
+                          flex: (_timedOut && _handsFree) ? 1 : 2,
                           child: _CookingButton(
                             label: _isLast
                                 ? 'Finish Cooking'
