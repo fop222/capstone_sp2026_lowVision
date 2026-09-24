@@ -326,6 +326,12 @@ String _dedupeStructuredShelfBlocks(String input) {
 
 enum _Phase { aisleSign, aisleResults, shelf, shelfResults }
 
+/// Phases within the tactile-verification dialog.
+enum _TactileDialogPhase { prompt, listening, confirming, noMatch, ambiguous }
+
+/// Reason the tactile-verification dialog was dismissed.
+enum _TactileDismiss { continueScanning, scanAnotherArea, doneShopping, confirmed }
+
 const _kMenuEnd = 'end';
 const _kMenuAisle = 'aisle';
 const _kMenuMute = 'mute';
@@ -1597,6 +1603,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     });
 
     // ── Pantry consecutive-miss tracking ────────────────────────────────────
+    // Capture whether fallback was already active BEFORE processing this
+    // scan's result — used below to decide regular msg vs. tactile prompt.
+    final wasAlreadyInFallback = _pantryFallbackActive;
     if (widget.pantryMode) {
       if (foundTargets.isNotEmpty) {
         // Successful match — miss streak stops counting, but the fallback
@@ -1612,15 +1621,23 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       }
     }
 
-    // ── Pantry fallback message ──────────────────────────────────────────────
-    // Show and speak the fallback instruction ONLY when fallback is active AND
-    // nothing was found.  If items ARE found while fallback is active, skip
-    // this block entirely — the normal detection pipeline runs below.
+    // ── Pantry fallback message / tactile verification ───────────────────────
+    // Show the fallback instruction ONLY when fallback is active AND nothing
+    // was found.  If items ARE found skip this block — normal pipeline runs.
+    //
+    //  • 2nd consecutive miss → fallback just activated → regular message.
+    //  • 3rd miss and beyond  → fallback ALREADY active → tactile prompt.
     if (widget.pantryMode && _pantryFallbackActive && foundTargets.isEmpty) {
-      const fallbackMsg =
-          'No items detected. Please remove some items from the fridge or pantry to check against your list.';
-      setState(() => _shelfStatusMessage = fallbackMsg);
-      await _speak(fallbackMsg);
+      if (wasAlreadyInFallback) {
+        // Third and subsequent failed scans: offer tactile verification.
+        await _showTactileVerificationPrompt();
+      } else {
+        // Second consecutive failed scan: show the regular fallback message.
+        const fallbackMsg =
+            'No items detected. Please remove some items from the fridge or pantry to check against your list.';
+        setState(() => _shelfStatusMessage = fallbackMsg);
+        await _speak(fallbackMsg);
+      }
       return;
     }
 
@@ -1838,6 +1855,398 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (remaining <= 0) return '$donePart.';
     final remPart = remaining == 1 ? '1 more to go' : '$remaining more to go';
     return '$donePart, $remPart.';
+  }
+
+  /// Fuzzy-matches a spoken [heard] phrase against [candidates] by normalising
+  /// both sides (lower-case, strip punctuation, stem plural 's'/'es') and
+  /// checking exact equality, substring containment, and token overlap.
+  /// Reuses the existing [_vlmAnswerMatchesTarget] tokeniser as a final pass.
+  List<_Item> _matchSpokenToItems(String heard, List<_Item> candidates) {
+    String norm(String s) => s
+        .toLowerCase()
+        .replaceAll(RegExp(r"[^\w\s]"), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    final h = norm(heard);
+    if (h.isEmpty) return [];
+
+    final results = <_Item>[];
+    for (final item in candidates) {
+      if (results.contains(item)) continue;
+      final t = norm(item.name);
+      if (t.isEmpty) continue;
+
+      // Exact or substring
+      if (h == t || h.contains(t) || t.contains(h)) {
+        results.add(item);
+        continue;
+      }
+      // Plural/singular: add or remove trailing 's' / 'es'
+      if ('${h}s' == t || h == '${t}s' || '${h}es' == t || h == '${t}es') {
+        results.add(item);
+        continue;
+      }
+      // Token-level: any heard token ≥ 4 chars that overlaps with item name
+      for (final token in h.split(' ')) {
+        if (token.length >= 4 && (t.contains(token) || token.contains(t))) {
+          results.add(item);
+          break;
+        }
+      }
+      // Final pass: reuse existing VLM fuzzy helper
+      if (!results.contains(item) && _vlmAnswerMatchesTarget(heard, item)) {
+        results.add(item);
+      }
+    }
+    return results;
+  }
+
+  // ── Tactile-verification prompt ──────────────────────────────────────────
+
+  /// Shown on the 3rd and every subsequent consecutive failed pantry scan
+  /// while fallback mode is active.  Offers voice identification as an
+  /// alternative to visual VLM detection.
+  Future<void> _showTactileVerificationPrompt() async {
+    const String promptMsg =
+        'I still could not identify the item. '
+        'If it is safe to touch, feel the item or its packaging. '
+        'Then select Voice Identification and tell me what you think it is.';
+    setState(() => _shelfStatusMessage = promptMsg);
+    await _speak(promptMsg);
+    if (!mounted) return;
+
+    // Local mutable dialog state — captured by the StatefulBuilder closure.
+    var phase = _TactileDialogPhase.prompt;
+    var partial = '';
+    var transcript = '';
+    var candidates = <_Item>[];
+    _Item? itemToConfirm;
+    var dismissReason = _TactileDismiss.continueScanning;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) {
+          // ── Voice listening sub-flow ──────────────────────────────────────
+          Future<void> beginListening() async {
+            setModal(() {
+              phase = _TactileDialogPhase.listening;
+              partial = '';
+              transcript = '';
+            });
+            await _speak('What item are you feeling?');
+            if (!ctx.mounted) return;
+
+            transcript = await _listenForSpokenAislePhrase(
+              onPartial: (p) {
+                if (ctx.mounted) setModal(() => partial = p);
+              },
+            );
+            if (!ctx.mounted) return;
+
+            final heard = transcript.trim();
+            if (heard.isEmpty) {
+              setModal(() => phase = _TactileDialogPhase.prompt);
+              await _speak('I did not hear anything. Please try again.');
+              return;
+            }
+
+            final unchecked = _uncheckedPendingShelfItems;
+            final found = _matchSpokenToItems(heard, unchecked);
+
+            if (found.isEmpty) {
+              setModal(() => phase = _TactileDialogPhase.noMatch);
+              if (ctx.mounted) {
+                await _speak(
+                  'I could not match that to your shopping list. '
+                  'Please try again or scan another area.',
+                );
+              }
+            } else if (found.length == 1) {
+              itemToConfirm = found.first;
+              setModal(() => phase = _TactileDialogPhase.confirming);
+              if (ctx.mounted) {
+                await _speak(
+                    'You identified ${itemToConfirm!.name}. Is that correct?');
+              }
+            } else {
+              candidates = found;
+              setModal(() => phase = _TactileDialogPhase.ambiguous);
+              if (ctx.mounted) {
+                final names =
+                    _englishNameList(found.map((e) => e.name).toList());
+                await _speak(
+                    'I found multiple possible matches: $names. '
+                    'Please select the item you are feeling.');
+              }
+            }
+          }
+
+          // ── Build dialog content by phase ─────────────────────────────────
+          String titleText;
+          List<Widget> body;
+
+          if (phase == _TactileDialogPhase.prompt) {
+            titleText = 'Item Identification';
+            body = [
+              const Text(
+                'I could not identify the item visually.',
+                style: TextStyle(fontSize: 20, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'If it is safe to touch, feel the item or its packaging, '
+                'then select Voice Identification and tell me what you think '
+                'it is.',
+                style: TextStyle(fontSize: 20, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                '⚠ Do not touch anything sharp, broken, leaking, hot, '
+                'or anything you are unsure about.',
+                style: TextStyle(
+                    fontSize: 18,
+                    height: 1.4,
+                    color: Color(0xFFFFB74D)),
+              ),
+              const SizedBox(height: 20),
+              _checkOffAnswerBox(
+                label: 'Voice Identification',
+                borderColor: const Color(0xFF3AE4C2),
+                onTap: () async => beginListening(),
+              ),
+              const SizedBox(height: 12),
+              _checkOffAnswerBox(
+                label: 'Scan Another Area',
+                borderColor: const Color(0xFF6D5EF5),
+                onTap: () {
+                  dismissReason = _TactileDismiss.scanAnotherArea;
+                  Navigator.of(ctx).pop();
+                },
+              ),
+              const SizedBox(height: 12),
+              _checkOffAnswerBox(
+                label: 'Done Scanning',
+                borderColor: Colors.white38,
+                onTap: () {
+                  dismissReason = _TactileDismiss.doneShopping;
+                  Navigator.of(ctx).pop();
+                },
+              ),
+            ];
+          } else if (phase == _TactileDialogPhase.listening) {
+            titleText = 'Listening…';
+            body = [
+              const Text(
+                'What item are you feeling?',
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              const Icon(Icons.mic, size: 52, color: Color(0xFF3AE4C2)),
+              const SizedBox(height: 8),
+              if (partial.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    partial,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontStyle: FontStyle.italic,
+                        color: Colors.white70),
+                  ),
+                ),
+              const SizedBox(height: 20),
+              _checkOffAnswerBox(
+                label: 'Stop Listening',
+                borderColor: const Color(0xFF6D5EF5),
+                onTap: () {
+                  final stop = _stopAisleListenRequested;
+                  if (stop != null && !stop.isCompleted) stop.complete();
+                },
+              ),
+            ];
+          } else if (phase == _TactileDialogPhase.confirming) {
+            titleText = 'Confirm Item';
+            body = [
+              Text(
+                'You identified ${itemToConfirm?.name ?? ''}.',
+                style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              const Text('Is that correct?',
+                  style: TextStyle(fontSize: 22, height: 1.4)),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _checkOffAnswerBox(
+                      label: 'Yes',
+                      borderColor: const Color(0xFF3AE4C2),
+                      onTap: () {
+                        dismissReason = _TactileDismiss.confirmed;
+                        Navigator.of(ctx).pop();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _checkOffAnswerBox(
+                      label: 'No',
+                      borderColor: const Color(0xFF6D5EF5),
+                      onTap: () async {
+                        setModal(() {
+                          phase = _TactileDialogPhase.prompt;
+                          partial = '';
+                          transcript = '';
+                          itemToConfirm = null;
+                        });
+                        await _speak(
+                            'Okay, let\'s try again. Select Voice '
+                            'Identification to tell me what you are feeling.');
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _checkOffAnswerBox(
+                label: 'Cancel',
+                borderColor: Colors.white38,
+                onTap: () => Navigator.of(ctx).pop(),
+              ),
+            ];
+          } else if (phase == _TactileDialogPhase.noMatch) {
+            titleText = 'No Match Found';
+            body = [
+              const Text(
+                'I could not match that item to your shopping list.',
+                style: TextStyle(fontSize: 20, height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Please try again or scan another area.',
+                style: TextStyle(fontSize: 20, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              _checkOffAnswerBox(
+                label: 'Try Again',
+                borderColor: const Color(0xFF3AE4C2),
+                onTap: () async {
+                  setModal(() {
+                    phase = _TactileDialogPhase.prompt;
+                    partial = '';
+                    transcript = '';
+                  });
+                  await _speak(
+                      'Select Voice Identification and tell me '
+                      'what item you are feeling.');
+                },
+              ),
+              const SizedBox(height: 12),
+              _checkOffAnswerBox(
+                label: 'Scan Another Area',
+                borderColor: const Color(0xFF6D5EF5),
+                onTap: () {
+                  dismissReason = _TactileDismiss.scanAnotherArea;
+                  Navigator.of(ctx).pop();
+                },
+              ),
+            ];
+          } else {
+            // _TactileDialogPhase.ambiguous
+            titleText = 'Select Item';
+            final ambiguousButtons = <Widget>[
+              const Text(
+                'I heard multiple possible matches. '
+                'Select the item you are feeling:',
+                style: TextStyle(fontSize: 20, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+            ];
+            for (final item in candidates) {
+              ambiguousButtons.add(
+                _checkOffAnswerBox(
+                  label: item.name,
+                  borderColor: const Color(0xFF3AE4C2),
+                  onTap: () async {
+                    itemToConfirm = item;
+                    setModal(() => phase = _TactileDialogPhase.confirming);
+                    await _speak(
+                        'You identified ${item.name}. Is that correct?');
+                  },
+                ),
+              );
+              ambiguousButtons.add(const SizedBox(height: 10));
+            }
+            ambiguousButtons.add(
+              _checkOffAnswerBox(
+                label: 'Try Again',
+                borderColor: Colors.white38,
+                onTap: () async {
+                  setModal(() {
+                    phase = _TactileDialogPhase.prompt;
+                    partial = '';
+                    transcript = '';
+                  });
+                },
+              ),
+            );
+            body = ambiguousButtons;
+          }
+
+          return AlertDialog(
+            title: Text(
+              titleText,
+              style: const TextStyle(
+                  fontSize: 26, fontWeight: FontWeight.bold),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: body,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    // ── Post-dialog actions ─────────────────────────────────────────────────
+    if (!mounted) return;
+    switch (dismissReason) {
+      case _TactileDismiss.scanAnotherArea:
+        await _onGoToShelf();
+
+      case _TactileDismiss.doneShopping:
+        await _onEndShopping();
+
+      case _TactileDismiss.confirmed:
+        if (itemToConfirm != null) {
+          setState(() {
+            itemToConfirm!.isChecked = true;
+            // Reset miss streak; fallback mode stays active for this session.
+            _pantryConsecutiveMisses = 0;
+          });
+          await _saveItemCheckedState(itemToConfirm!);
+          if (!mounted) return;
+          await _speak(
+              '${itemToConfirm!.name} has been checked off your shopping list.');
+          await _speakAfterScanCheckOffWithOptionalFinish(itemToConfirm!);
+        }
+
+      case _TactileDismiss.continueScanning:
+        break;
+    }
   }
 
   /// After checking off from a shelf scan (Yes): progress TTS, then optionally congrats + exit if the list is complete.
