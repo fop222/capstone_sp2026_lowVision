@@ -1936,7 +1936,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         'I still could not identify the item. '
         'If it is safe to touch, feel the item or its packaging. '
         'Then select Voice Identification and tell me what you think it is.';
-    setState(() => _shelfStatusMessage = promptMsg);
+    // Clear the background status message so only the dialog is visible.
+    setState(() => _shelfStatusMessage = '');
     await _speak(promptMsg);
     if (!mounted) return;
 
