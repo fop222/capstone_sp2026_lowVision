@@ -2034,7 +2034,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 onPartial: (p) {
                   if (ctx.mounted) setModal(() => partial = p);
                 },
-                pauseFor: const Duration(seconds: 8),
+                pauseFor: const Duration(seconds: 3),
                 silentErrors: true,
               );
               if (!ctx.mounted) return;
