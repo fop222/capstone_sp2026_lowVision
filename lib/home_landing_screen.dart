@@ -1,26 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_drawer.dart';
 import 'grocery_list_screen.dart';
 import 'grocery_ui.dart';
-import 'profile_setup_screen.dart';
 import 'recipe_list_screen.dart';
-import 'supabase_auth_screen.dart';
-import 'surprise_me_state.dart';
 
 /// Top-level home after sign-in: choose Shopping, Cooking, or Eating.
 class HomeLandingScreen extends StatelessWidget {
   const HomeLandingScreen({super.key});
-
-  Future<void> _signOut(BuildContext context) async {
-    clearRecommendedRecipes(); // clear Surprise Me! recipes on logout
-    await Supabase.instance.client.auth.signOut();
-    if (!context.mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const SupabaseAuthScreen()),
-    );
-  }
 
   void _openShopping(BuildContext context) {
     Navigator.of(context).push(
@@ -105,6 +93,7 @@ class HomeLandingScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      drawer: const AppNavigationDrawer(),
       appBar: AppBar(
         title: Text(
           'Lumio',
@@ -113,26 +102,6 @@ class HomeLandingScreen extends StatelessWidget {
             letterSpacing: 1.1,
           ),
         ),
-        actions: [
-          Tooltip(
-            message: 'Edit profile',
-            child: IconButton(
-              icon: const Icon(Icons.person_outline, size: 32),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const ProfileSetupScreen(isEditing: true),
-                ),
-              ),
-            ),
-          ),
-          Tooltip(
-            message: 'Sign out',
-            child: IconButton(
-              icon: const Icon(Icons.logout, size: 28),
-              onPressed: () => _signOut(context),
-            ),
-          ),
-        ],
       ),
       body: GroceryAmbientBackdrop(
         child: SafeArea(

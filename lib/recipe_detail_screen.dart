@@ -414,18 +414,24 @@ class _IngredientItem extends StatelessWidget {
                   style: theme.textTheme.bodyLarge?.copyWith(
                     color: Colors.white70,
                   ),
+                  softWrap: true,
                 ),
               ),
-              // Quantity (right-aligned, only when available)
+              // Quantity (right-aligned, only when available).
+              // Flexible so very long quantities wrap instead of overflowing.
               if (ingredient.quantity.isNotEmpty) ...[
                 const SizedBox(width: 12),
-                Text(
-                  ingredient.quantity,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  fit: FlexFit.loose,
+                  child: Text(
+                    ingredient.quantity,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.right,
+                    softWrap: true,
                   ),
-                  textAlign: TextAlign.right,
                 ),
               ],
             ],

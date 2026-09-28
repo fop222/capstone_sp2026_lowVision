@@ -64,8 +64,9 @@ class RecipeTag extends StatelessWidget {
 
 /// Displays difficulty as filled/empty squares alongside a numeric label.
 ///
-/// Example: "■ ■ ■ □ □  Difficulty: 3 / 5"
+/// Example: "Difficulty  ■ ■ ■ □ □  3/5"
 /// Uses square icons for a clear, modern look that works well for low vision.
+/// Wraps gracefully on narrow screens via [FittedBox].
 class RecipeDifficultyRow extends StatelessWidget {
   const RecipeDifficultyRow({super.key, required this.difficulty});
 
@@ -76,39 +77,43 @@ class RecipeDifficultyRow extends StatelessWidget {
     return Semantics(
       label: 'Difficulty $difficulty out of 5',
       child: ExcludeSemantics(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Difficulty: ',
-              style: const TextStyle(
-                fontSize: 17,
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
+        // FittedBox lets the row shrink to fit narrow containers (e.g. recipe
+        // cards on small phones) without ever overflowing.
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Difficulty ',
+                style: TextStyle(
+                  fontSize: 17,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            for (int i = 1; i <= 5; i++) ...[
-              Icon(
-                i <= difficulty
-                    ? Icons.square_rounded
-                    : Icons.square_outlined,
-                size: 20,
-                color: i <= difficulty
-                    ? Colors.white
-                    : Colors.white38,
+              for (int i = 1; i <= 5; i++) ...[
+                Icon(
+                  i <= difficulty
+                      ? Icons.square_rounded
+                      : Icons.square_outlined,
+                  size: 20,
+                  color: i <= difficulty ? Colors.white : Colors.white38,
+                ),
+                const SizedBox(width: 2),
+              ],
+              const SizedBox(width: 6),
+              Text(
+                '$difficulty/5',
+                style: const TextStyle(
+                  fontSize: 17,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              const SizedBox(width: 2),
             ],
-            const SizedBox(width: 4),
-            Text(
-              '$difficulty / 5',
-              style: const TextStyle(
-                fontSize: 17,
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

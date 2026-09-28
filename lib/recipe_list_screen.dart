@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_drawer.dart';
 import 'grocery_ui.dart';
 import 'imported_recipes_state.dart';
 import 'recipe_data.dart';
@@ -84,7 +85,8 @@ class _RecipeListBody extends StatelessWidget {
     final theme = Theme.of(context);
     final padding = groceryPagePadding(context);
 
-    return Scaffold(
+      return Scaffold(
+      drawer: const AppNavigationDrawer(),
       appBar: AppBar(
         title: const Text('Recipes'),
       ),
@@ -393,23 +395,31 @@ class _RecipeCard extends StatelessWidget {
             const SizedBox(height: 10),
 
             // ── Time + difficulty ─────────────────────────────────────────
-            Row(
+            // Use Wrap so difficulty drops to next line on narrow phones.
+            Wrap(
+              spacing: 16,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Icon(
-                  Icons.access_time_rounded,
-                  size: 16,
-                  color: kBrandPurpleLight,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.access_time_rounded,
+                      size: 18,
+                      color: kBrandPurpleLight,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '~${recipe.estimatedTimeMinutes} min',
+                      style: TextStyle(
+                        fontSize: 18,
+                        color: kBrandPurpleLight,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 5),
-                Text(
-                  '~${recipe.estimatedTimeMinutes} min',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: kBrandPurpleLight,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 16),
                 RecipeDifficultyRow(difficulty: recipe.difficulty),
               ],
             ),

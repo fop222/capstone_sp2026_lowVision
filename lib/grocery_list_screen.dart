@@ -2,14 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_drawer.dart';
 import 'app_tts.dart';
 import 'app_speech.dart';
 import 'main.dart';
 import 'take_picture_screen.dart';
 import 'grocery_list_detail_screen.dart';
-import 'supabase_auth_screen.dart';
 import 'aisle_scanner_vlm_screen.dart';
-import 'profile_setup_screen.dart';
 import 'grocery_list_duplicate.dart';
 import 'grocery_ui.dart';
 import 'imported_recipes_state.dart';
@@ -472,48 +471,14 @@ class _GroceryListScreenState extends State<GroceryListScreen> {
     );
   }
 
-  Future<void> _signOut() async {
-    clearRecommendedRecipes(); // clear Surprise Me! recipes on logout
-    await supabase.auth.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const SupabaseAuthScreen()),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final filtered = _filteredLists();
     return Scaffold(
+      drawer: const AppNavigationDrawer(),
       appBar: AppBar(
         title: const Text('My Grocery Lists'),
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                tooltip: 'Back',
-                icon: const Icon(Icons.arrow_back, size: 32),
-                onPressed: () => Navigator.of(context).pop(),
-              )
-            : Tooltip(
-                message: 'Edit profile',
-                child: IconButton(
-                  icon: const Icon(Icons.person_outline, size: 32),
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            const ProfileSetupScreen(isEditing: true)),
-                  ),
-                ),
-              ),
-        actions: [
-          Tooltip(
-            message: 'Sign out',
-            child: IconButton(
-              icon: const Icon(Icons.logout, size: 32),
-              onPressed: _signOut,
-            ),
-          ),
-        ],
       ),
       body: GroceryAmbientBackdrop(
         child: _loading
