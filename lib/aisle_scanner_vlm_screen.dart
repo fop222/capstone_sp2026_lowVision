@@ -2198,17 +2198,6 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   ),
                 ),
               const SizedBox(height: 20),
-              // Primary action: use what was already captured and match it now.
-              if (partial.isNotEmpty)
-                _checkOffAnswerBox(
-                  label: 'Match "${partial.split(' ').take(4).join(' ')}"',
-                  borderColor: const Color(0xFF3AE4C2),
-                  onTap: () {
-                    final stop = _stopAisleListenRequested;
-                    if (stop != null && !stop.isCompleted) stop.complete();
-                  },
-                ),
-              if (partial.isNotEmpty) const SizedBox(height: 10),
               _checkOffAnswerBox(
                 label: 'Stop Listening',
                 borderColor: const Color(0xFF6D5EF5),
