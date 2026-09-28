@@ -179,14 +179,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       });
     }
 
-    var recognized = '';
-      await AppSpeech.I.stt.listen(
-        onResult: (result) {
-          if (!mounted) return;
-          // Never overwrite a good result with an empty string —
-          // Chrome fires a trailing empty final event after a pause.
-          if (result.recognizedWords.isNotEmpty) {
-            recognized = result.recognizedWords;
     while (_stillActive(gen) && recognized.isEmpty) {
       var attemptResult = '';
       try {
@@ -207,8 +199,8 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
         );
       } catch (_) {
         attemptResult = '';
-        Duration(milliseconds: kIsWeb ? 450 : 150));
-      setState(() {
+      }
+
       while (AppSpeech.I.stt.isListening) {
         if (!mounted || !_stillActive(gen)) {
           await AppSpeech.I.stt.stop();
@@ -225,8 +217,13 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       // Keep the listening indicator on while the browser session resets.
       await Future.delayed(Duration(milliseconds: kIsWeb ? 1200 : 400));
     }
-    }
 
+    if (mounted) {
+      setState(() {
+        _listening = false;
+        _listenTranscript = '';
+      });
+    }
     return recognized.trim();
   }
 
