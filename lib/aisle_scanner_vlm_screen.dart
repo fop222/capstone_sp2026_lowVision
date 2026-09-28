@@ -581,12 +581,17 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   /// Leave null (the default) for the aisle-name flow where the user may take
   /// their time spelling out a word or pausing between words.
   ///
+  /// [silentErrors] — when true, suppresses the SnackBar on STT start errors
+  /// (e.g. "recognition already started" during a retry loop) and returns ''
+  /// silently instead.
+  ///
   /// Critical: we never overwrite [recognized] with an empty string, so the
   /// last non-empty words the user said are always returned even if the STT
   /// engine fires a trailing empty final event.
   Future<String> _listenForSpokenAislePhrase({
     void Function(String partial)? onPartial,
     Duration? pauseFor,
+    bool silentErrors = false,
   }) async {
     if (!_speechAvailable) return '';
 
@@ -617,7 +622,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             }
           },
           listenFor: pauseFor != null
-              ? const Duration(seconds: 20)
+              ? const Duration(seconds: 60)
               : const Duration(minutes: 30),
           pauseFor: pauseFor,
           localeId: englishSpeechToTextLocaleId(),
@@ -630,7 +635,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
           ),
         );
       } catch (e) {
-        if (mounted) {
+        if (!silentErrors && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -2029,7 +2034,8 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 onPartial: (p) {
                   if (ctx.mounted) setModal(() => partial = p);
                 },
-                pauseFor: const Duration(seconds: 3),
+                pauseFor: const Duration(seconds: 8),
+                silentErrors: true,
               );
               if (!ctx.mounted) return;
               heard = transcript.trim();
