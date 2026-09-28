@@ -189,7 +189,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
             setState(() => _listenTranscript = attemptResult);
           },
           listenFor: const Duration(seconds: 30),
-          pauseFor: const Duration(seconds: 10),
+          pauseFor: const Duration(seconds: 2),
           localeId: englishSpeechToTextLocaleId(),
           listenOptions: SpeechListenOptions(
             listenMode: ListenMode.confirmation,
@@ -215,7 +215,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       }
 
       // Keep the listening indicator on while the browser session resets.
-      await Future.delayed(Duration(milliseconds: kIsWeb ? 1200 : 400));
+      await Future.delayed(Duration(milliseconds: kIsWeb ? 300 : 200));
     }
 
     if (mounted) {

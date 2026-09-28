@@ -1925,7 +1925,12 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final canonicalHeard = normalizePantryFoodName(h);
     final canonicalMatches = candidates
         .where(
-          (item) => normalizePantryFoodName(item.name) == canonicalHeard,
+          (item) {
+            final canonicalName = normalizePantryFoodName(item.name);
+            return canonicalName == canonicalHeard ||
+                canonicalName.replaceAll(' ', '') ==
+                    canonicalHeard.replaceAll(' ', '');
+          },
         )
         .toList();
     if (canonicalMatches.isNotEmpty) return canonicalMatches;
@@ -2050,11 +2055,15 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
               // If still nothing, loop silently — no error message.
             }
 
-            final unchecked = _uncheckedPendingShelfItems;
+            final unchecked = _items.where((item) => !item.isChecked).toList();
             final found = _matchSpokenToItems(heard, unchecked);
 
             if (found.isEmpty) {
-              setModal(() => phase = _TactileDialogPhase.noMatch);
+              setModal(() {
+                phase = _TactileDialogPhase.noMatch;
+                partial = heard;
+                transcript = heard;
+              });
               if (ctx.mounted) {
                 await _speak(
                   'I could not match that to your shopping list. '
@@ -2224,6 +2233,16 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
           } else if (phase == _TactileDialogPhase.noMatch) {
             titleText = 'No Match Found';
             body = [
+              if (transcript.isNotEmpty)
+                Text(
+                  'I heard: "$transcript"',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontStyle: FontStyle.italic,
+                    color: Colors.white70,
+                  ),
+                ),
+              if (transcript.isNotEmpty) const SizedBox(height: 8),
               const Text(
                 'I could not match that item to your shopping list.',
                 style: TextStyle(fontSize: 20, height: 1.4),

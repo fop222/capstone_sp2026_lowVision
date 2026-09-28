@@ -218,7 +218,7 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
             setState(() => _listenTranscript = attemptResult);
           },
           listenFor: const Duration(seconds: 30),
-          pauseFor: const Duration(seconds: 10),
+          pauseFor: const Duration(seconds: 2),
           localeId: englishSpeechToTextLocaleId(),
           listenOptions: SpeechListenOptions(
             listenMode: ListenMode.confirmation,
@@ -242,7 +242,7 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
         recognized = attemptResult;
         break;
       }
-      await Future.delayed(Duration(milliseconds: kIsWeb ? 1200 : 400));
+      await Future.delayed(Duration(milliseconds: kIsWeb ? 300 : 200));
     }
 
     if (mounted) {
