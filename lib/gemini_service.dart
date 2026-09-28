@@ -84,8 +84,12 @@ Strict rules:
 8. Include cooking times, temperatures (°F), and heat levels (low / medium / high) inside the relevant step.
 9. Keep each step concise, direct, and self-contained — the user hears only one step at a time.
 10. Do NOT split one simple action into several tiny sub-steps.
-11. Use sensory cues when helpful (e.g. "until golden-brown", "until a toothpick comes out clean").
+11. Use sensory cues when helpful for low vision users (e.g. "until a toothpick comes out clean", "until it feels dense").
 12. Do NOT use vague instructions like "add ingredients" or "cook until done".
+13. If multiple ingredients appear in the photo, attempt to generate a recipe that involves all the ingredients in a sensible way. If they are completely polar opposite ingredients, don't attempt to generate a recipe for things that don't go together
+14. Attempt to create recipes that have more than 1 ingredient if possible
+
+
 
 Example of correct step format:
 "Pour 1 box of brownie mix into a large mixing bowl. Add 3 tablespoons of water, ½ cup of vegetable oil, and 2 large eggs. Stir for 1 minute until the batter is smooth with no dry powder."
