@@ -48,9 +48,7 @@ class HomeLandingScreen extends StatelessWidget {
     Color? accent,
   }) {
     final theme = Theme.of(context);
-    // Use a single deep purple for all buttons — solid, no gradient,
-    // ensuring WCAG AAA (≥ 4.5 : 1) for large text with white foreground.
-    const bgColor = Color(0xFF3D2FB0); // deep purple, L ≈ 0.06 → ratio > 9:1
+    final bgColor = accent ?? const Color(0xFF005A8D);
     return Semantics(
       button: true,
       label: label,
@@ -165,6 +163,7 @@ class HomeLandingScreen extends StatelessWidget {
                       context: context,
                       label: 'SHOPPING',
                       icon: Icons.shopping_cart_outlined,
+                      accent: const Color(0xFF005A8D),
                       onPressed: () => _openShopping(context),
                     ),
                     const SizedBox(height: 18),
@@ -172,6 +171,7 @@ class HomeLandingScreen extends StatelessWidget {
                       context: context,
                       label: 'COOKING',
                       icon: Icons.soup_kitchen_outlined,
+                      accent: const Color(0xFF176B3A),
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => const RecipeListScreen(),
@@ -183,6 +183,7 @@ class HomeLandingScreen extends StatelessWidget {
                       context: context,
                       label: 'EATING',
                       icon: Icons.restaurant_outlined,
+                      accent: const Color(0xFF8A4B08),
                       onPressed: () => _comingSoon(context, 'Eating'),
                     ),
                   ],
