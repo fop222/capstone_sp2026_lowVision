@@ -208,41 +208,42 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
       });
     }
 
-    try {
-      await AppSpeech.I.stt.listen(
-        onResult: (result) {
-          if (!mounted) return;
-          recognized = result.recognizedWords;
-          setState(() => _listenTranscript = recognized);
-        },
-        listenFor: const Duration(seconds: 15),
-        pauseFor: const Duration(seconds: 4),
-        localeId: englishSpeechToTextLocaleId(),
-        listenOptions: SpeechListenOptions(
-          listenMode: ListenMode.confirmation,
-          partialResults: true,
-          cancelOnError: false,
-        ),
-      );
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _listening = false;
-          _listenTranscript = '';
-        });
+    while (_stillActive(gen) && recognized.isEmpty) {
+      var attemptResult = '';
+      try {
+        await AppSpeech.I.stt.listen(
+          onResult: (result) {
+            if (!mounted || result.recognizedWords.isEmpty) return;
+            attemptResult = result.recognizedWords;
+            setState(() => _listenTranscript = attemptResult);
+          },
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 10),
+          localeId: englishSpeechToTextLocaleId(),
+          listenOptions: SpeechListenOptions(
+            listenMode: ListenMode.confirmation,
+            partialResults: true,
+            cancelOnError: false,
+          ),
+        );
+      } catch (_) {
+        attemptResult = '';
       }
-      return '';
-    }
 
-    while (AppSpeech.I.stt.isListening) {
-      if (!mounted || !_stillActive(gen)) {
-        await AppSpeech.I.stt.stop();
+      while (AppSpeech.I.stt.isListening) {
+        if (!mounted || !_stillActive(gen)) {
+          await AppSpeech.I.stt.stop();
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      if (attemptResult.isNotEmpty) {
+        recognized = attemptResult;
         break;
       }
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.delayed(Duration(milliseconds: kIsWeb ? 1200 : 400));
     }
-
-    await Future.delayed(Duration(milliseconds: kIsWeb ? 450 : 150));
 
     if (mounted) {
       setState(() {
@@ -383,7 +384,7 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
 
                     // ── Hands-Free Mode toggle ────────────────────────
                     GestureDetector(
-                      onTap: (_speaking || _listening)
+                        onTap: (_speaking || _listening || _waitingConfirm)
                           ? null
                           : _onToggleHandsFree,
                       child: Container(
@@ -438,7 +439,7 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
                             ),
                             Switch(
                               value: _handsFree,
-                              onChanged: (_speaking || _listening)
+                                onChanged: (_speaking || _listening || _waitingConfirm)
                                   ? null
                                   : (_) => _onToggleHandsFree(),
                               activeColor: kBrandPurpleLight,

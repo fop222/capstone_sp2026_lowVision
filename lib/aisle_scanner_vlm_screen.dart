@@ -1922,6 +1922,14 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final h = norm(heard);
     if (h.isEmpty) return [];
 
+    final canonicalHeard = normalizePantryFoodName(h);
+    final canonicalMatches = candidates
+        .where(
+          (item) => normalizePantryFoodName(item.name) == canonicalHeard,
+        )
+        .toList();
+    if (canonicalMatches.isNotEmpty) return canonicalMatches;
+
     final heardTokens = h.split(' ').where((t) => t.length >= 3).toList();
 
     final results = <_Item>[];

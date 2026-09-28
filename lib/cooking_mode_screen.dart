@@ -154,9 +154,8 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
   // ── STT (Hands-Free only) ────────────────────────────────────────────────
 
-  /// Listens for a spoken yes/no response, updating [_listenTranscript] as
-  /// words are recognised.  Returns the final recognised text, or an empty
-  /// string on timeout / unavailable.
+  /// Listens until a spoken response is captured, restarting the browser
+  /// recognition session silently when it ends without any words.
   Future<String> _listenForHFResponse(int gen) async {
     if (!_speechAvailable || !mounted) return '';
 
@@ -180,7 +179,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       });
     }
 
-    try {
+    var recognized = '';
       await AppSpeech.I.stt.listen(
         onResult: (result) {
           if (!mounted) return;
@@ -188,48 +187,44 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
           // Chrome fires a trailing empty final event after a pause.
           if (result.recognizedWords.isNotEmpty) {
             recognized = result.recognizedWords;
-            setState(() => _listenTranscript = recognized);
-          }
-        },
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 10),
-        localeId: englishSpeechToTextLocaleId(),
-        listenOptions: SpeechListenOptions(
-          listenMode: ListenMode.confirmation,
-          partialResults: true,
-          cancelOnError: false,
-        ),
-      );
-    } catch (_) {
-      // Swallow start errors (e.g. "recognition already started") —
-      // the caller loop will retry after a delay.
-      if (mounted) {
-        setState(() {
-          _listening = false;
-          _listenTranscript = '';
-        });
+    while (_stillActive(gen) && recognized.isEmpty) {
+      var attemptResult = '';
+      try {
+        await AppSpeech.I.stt.listen(
+          onResult: (result) {
+            if (!mounted || result.recognizedWords.isEmpty) return;
+            attemptResult = result.recognizedWords;
+            setState(() => _listenTranscript = attemptResult);
+          },
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 10),
+          localeId: englishSpeechToTextLocaleId(),
+          listenOptions: SpeechListenOptions(
+            listenMode: ListenMode.confirmation,
+            partialResults: true,
+            cancelOnError: false,
+          ),
+        );
+      } catch (_) {
+        attemptResult = '';
+        Duration(milliseconds: kIsWeb ? 450 : 150));
+      setState(() {
+      while (AppSpeech.I.stt.isListening) {
+        if (!mounted || !_stillActive(gen)) {
+          await AppSpeech.I.stt.stop();
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 200));
       }
-      return '';
-    }
 
-    // Poll until speech_to_text finishes (pauseFor / listenFor / stop()).
-    while (AppSpeech.I.stt.isListening) {
-      if (!mounted || !_stillActive(gen)) {
-        await AppSpeech.I.stt.stop();
+      if (attemptResult.isNotEmpty) {
+        recognized = attemptResult;
         break;
       }
-      await Future.delayed(const Duration(milliseconds: 200));
+
+      // Keep the listening indicator on while the browser session resets.
+      await Future.delayed(Duration(milliseconds: kIsWeb ? 1200 : 400));
     }
-
-    // Small settle delay so the UI reflects the final state.
-    await Future.delayed(
-        Duration(milliseconds: kIsWeb ? 450 : 150));
-
-    if (mounted) {
-      setState(() {
-        _listening = false;
-        _listenTranscript = '';
-      });
     }
 
     return recognized.trim();
@@ -340,19 +335,12 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// restarts automatically until the user speaks or manually navigates away.
   Future<void> _runListenCycle(int gen) async {
     while (_stillActive(gen)) {
-      if (mounted) setState(() => _waitingConfirm = true);
-
       final heard = await _listenForHFResponse(gen);
       if (!_stillActive(gen)) return;
 
-      if (mounted) setState(() => _waitingConfirm = false);
-
-      // No speech detected — wait for the browser to fully reset the
-      // SpeechRecognition session before restarting (avoids rapid cycling
-      // between "Waiting…" and "Listening…" on web).
+      // The listener normally waits indefinitely. Keep this guard for a
+      // cancelled or unavailable session without changing the UI phase.
       if (heard.isEmpty) {
-        await Future.delayed(
-            Duration(milliseconds: kIsWeb ? 1500 : 500));
         continue;
       }
 
@@ -517,7 +505,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                     // ── Hands-Free Mode toggle ────────────────────────
                     _HandsFreeToggle(
                       value: _handsFree,
-                      onToggle: (_speaking || _listening)
+                        onToggle: (_speaking || _listening || _waitingConfirm)
                           ? null
                           : _onToggleHandsFree,
                     ),
