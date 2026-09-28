@@ -215,7 +215,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                               Text(
                                 'Help us personalize your experience',
                                 style: theme.textTheme.bodyMedium
-                                    ?.copyWith(color: Colors.white60),
+                                    ?.copyWith(color: Colors.white70),
                               ),
                             ],
                           ),
@@ -242,7 +242,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     Text(
                       'Select all that apply',
                       style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: Colors.white60),
+                          ?.copyWith(color: Colors.white70),
                     ),
                     const SizedBox(height: 12),
                     Wrap(
@@ -251,8 +251,28 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       children: _dietOptions.map((opt) {
                         final selected = _selectedDiet.contains(opt);
                         return FilterChip(
-                          label: Text(opt),
+                          label: Text(
+                            opt,
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: selected
+                                  ? const Color(0xFF0A2E1A)
+                                  : Colors.white,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.normal,
+                            ),
+                          ),
                           selected: selected,
+                          backgroundColor: const Color(0xFF1A1D24),
+                          selectedColor: const Color(0xFF2ECC71),
+                          checkmarkColor: const Color(0xFF0A2E1A),
+                          side: BorderSide(
+                            color: selected
+                                ? const Color(0xFF2ECC71)
+                                : Colors.white24,
+                            width: 1.5,
+                          ),
                           onSelected: (v) => setState(() {
                             if (v) {
                               if (opt == 'No restrictions') {
@@ -274,7 +294,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     Text(
                       'Select all that apply',
                       style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: Colors.white60),
+                          ?.copyWith(color: Colors.white70),
                     ),
                     const SizedBox(height: 12),
                     Wrap(

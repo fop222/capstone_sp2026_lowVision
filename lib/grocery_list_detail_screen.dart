@@ -13,8 +13,6 @@ import 'grocery_ui.dart';
 import 'main.dart';
 import 'shopping_voice_host.dart';
 
-enum _ListShopTab { getIt, gotIt }
-
 /// Capitalizes the first letter of [s] without altering the rest.
 String _capFirst(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
@@ -41,7 +39,6 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
   bool _loading = true;
   String? _error;
   late String _listTitle;
-  _ListShopTab _shopTab = _ListShopTab.getIt;
 
   final FlutterTts _tts = FlutterTts();
   bool _speechAvailable = false;
@@ -602,22 +599,173 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
+  // Solid card colour — no gradient (keeps one neutral dark shade).
+  static const _cardColor = Color(0xFF1E2130);
+  static const _checkedGreen = Color(0xFF2ECC71);
+
+  Widget _buildItemCard(
+    BuildContext context,
+    Map<String, dynamic> item,
+    ThemeData theme,
+  ) {
+    final checked = item['is_checked'] as bool? ?? false;
+    final qty = quantityFromItemRow(item);
+    final itemId = item['id'] as String;
+    final itemName = _capFirst(item['name'] as String? ?? '');
+
+    Widget card = Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: checked
+            ? const Color(0xFF163324) // dark green tint for checked
+            : _cardColor,
+        border: Border.all(
+          color: checked
+              ? _checkedGreen.withValues(alpha: 0.35)
+              : Colors.white.withValues(alpha: 0.08),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 6,
+        ),
+        leading: Checkbox(
+          value: checked,
+          onChanged: (_) => _toggleItem(itemId, checked),
+          activeColor: _checkedGreen,
+        ),
+        // Quantity badge + name inline in title row
+        title: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Quantity pill — bold and prominent
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: checked
+                    ? _checkedGreen.withValues(alpha: 0.25)
+                    : kBrandPurpleMid.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  value: qty,
+                  dropdownColor: const Color(0xFF1E2130),
+                  isDense: true,
+                  style: TextStyle(
+                    fontSize: 20,
+                    color: checked ? _checkedGreen : Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  items: List.generate(
+                    10,
+                    (i) => DropdownMenuItem(
+                      value: i + 1,
+                      child: Text(
+                        '${i + 1}',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                  onChanged: checked
+                      ? null
+                      : (v) {
+                          if (v != null) _updateItemQuantity(itemId, v);
+                        },
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                itemName,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                  color: checked ? _checkedGreen : Colors.white,
+                  decoration:
+                      checked ? TextDecoration.lineThrough : null,
+                  decorationColor:
+                      checked ? _checkedGreen : null,
+                  decorationThickness: checked ? 2 : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Tooltip(
+              message: 'Edit name',
+              child: IconButton(
+                icon: Icon(
+                  Icons.edit_outlined,
+                  size: 26,
+                  color: checked
+                      ? _checkedGreen.withValues(alpha: 0.7)
+                      : theme.colorScheme.primary,
+                ),
+                onPressed: () =>
+                    _editItemName(itemId, item['name'] as String? ?? ''),
+              ),
+            ),
+            Tooltip(
+              message: 'Delete item',
+              child: IconButton(
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 26,
+                  color: theme.colorScheme.error,
+                ),
+                onPressed: () => _confirmDeleteItem(
+                    itemId, item['name'] as String? ?? ''),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // Slightly fade checked items so users know they're done.
+    if (checked) card = Opacity(opacity: 0.72, child: card);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: card,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final total = _items.length;
     final done =
         _items.where((i) => i['is_checked'] as bool? ?? false).length;
-    final getItCount = total - done;
+    final remaining = total - done;
     final progress = total > 0 ? done / total : 0.0;
 
-    final filtered = _items.where((item) {
-      final checked = item['is_checked'] as bool? ?? false;
-      return _shopTab == _ListShopTab.getIt ? !checked : checked;
-    }).toList();
+    // Split into unchecked (grouped by category) and checked (flat at bottom).
+    final unchecked =
+        _items.where((i) => !(i['is_checked'] as bool? ?? false)).toList();
+    final checked =
+        _items.where((i) => i['is_checked'] as bool? ?? false).toList();
 
+    // Group unchecked items by aisle category.
     final grouped = <String, List<Map<String, dynamic>>>{};
-    for (final item in filtered) {
+    for (final item in unchecked) {
       final bucket = categoryBucketKeyFromRaw(categoryFromItemMap(item));
       grouped.putIfAbsent(bucket, () => []).add(item);
     }
@@ -629,207 +777,78 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
       });
 
     Widget listBody() {
-      if (filtered.isEmpty) {
+      if (total == 0) {
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             SizedBox(height: MediaQuery.sizeOf(context).height * 0.12),
-            Icon(
-              _shopTab == _ListShopTab.getIt
-                  ? Icons.shopping_bag_outlined
-                  : Icons.check_circle_outline,
-              size: 64,
-              color: Colors.white38,
-            ),
+            const Icon(Icons.shopping_basket_outlined,
+                size: 72, color: Colors.white38),
             const SizedBox(height: 16),
             Text(
-              _shopTab == _ListShopTab.getIt
-                  ? 'Nothing left to get — or switch to Got it for checked items.'
-                  : 'No checked items yet — use Get it and tap the checkbox when you pick something up.',
+              'No items yet — tap + to add your first ingredient.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodyLarge?.copyWith(color: Colors.white60),
+              style: theme.textTheme.bodyLarge
+                  ?.copyWith(color: Colors.white70),
             ),
           ],
         );
       }
 
-      return ListView.builder(
+      return ListView(
         padding: EdgeInsets.fromLTRB(
           0,
           0,
           0,
           MediaQuery.paddingOf(context).bottom + 88,
         ),
-        itemCount: sortedCategories.length,
-        itemBuilder: (_, ci) {
-          final bucket = sortedCategories[ci];
-          final catItems = grouped[bucket]!;
-          final allDone =
-              catItems.every((i) => i['is_checked'] as bool? ?? false);
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
-                child: Text(
-                  displayCategorySectionTitle(bucket).toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    color: allDone ? kAccentMint : theme.colorScheme.primary,
-                    letterSpacing: 1.35,
-                  ),
+        children: [
+          // ── Unchecked items, grouped by aisle ──
+          for (final bucket in sortedCategories) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
+              child: Text(
+                displayCategorySectionTitle(bucket).toUpperCase(),
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.primary,
+                  letterSpacing: 1.35,
                 ),
               ),
-              ...catItems.map((item) {
-                final checked = item['is_checked'] as bool? ?? false;
-                final qty = quantityFromItemRow(item);
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          const Color(0xFF23263A).withValues(alpha: 0.95),
-                          const Color(0xFF181B28),
-                        ],
-                      ),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.25),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: ListTile(
-                      isThreeLine: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      leading: Checkbox(
-                        value: checked,
-                        onChanged: (_) =>
-                            _toggleItem(item['id'] as String, checked),
-                      ),
-                      title: Text(
-                        _capFirst(item['name'] as String? ?? ''),
-                        style: TextStyle(
-                          fontSize: 22,
-                          decoration: checked
-                              ? TextDecoration.lineThrough
-                              : null,
-                          decorationColor: checked
-                              ? const Color(0xFFFF1744)
-                              : null,
-                          decorationThickness: checked ? 3 : null,
-                          color: Colors.white,
-                        ),
-                      ),
-                      subtitle: Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Row(
-                          children: [
-                            Text(
-                              'How many',
-                              style: TextStyle(
-                                fontSize: 17,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.07),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.12),
-                                ),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  value: qty,
-                                  dropdownColor: const Color(0xFF1E2230),
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  items: List.generate(
-                                    10,
-                                    (i) => DropdownMenuItem(
-                                      value: i + 1,
-                                      child: Text('${i + 1}'),
-                                    ),
-                                  ),
-                                  onChanged: (v) {
-                                    if (v != null) {
-                                      _updateItemQuantity(
-                                        item['id'] as String,
-                                        v,
-                                      );
-                                    }
-                                  },
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Tooltip(
-                            message: 'Edit name',
-                            child: IconButton(
-                              icon: Icon(
-                                Icons.edit_outlined,
-                                size: 28,
-                                color: theme.colorScheme.primary,
-                              ),
-                              onPressed: () => _editItemName(
-                                item['id'] as String,
-                                item['name'] as String? ?? '',
-                              ),
-                            ),
-                          ),
-                          Tooltip(
-                            message: 'Delete item',
-                            child: IconButton(
-                              icon: Icon(
-                                Icons.delete_outline_rounded,
-                                size: 28,
-                                color: theme.colorScheme.error,
-                              ),
-                              onPressed: () => _confirmDeleteItem(
-                                item['id'] as String,
-                                item['name'] as String? ?? '',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+            ),
+            for (final item in grouped[bucket]!)
+              _buildItemCard(context, item, theme),
+            Divider(
+              height: 24,
+              color: Colors.white.withValues(alpha: 0.08),
+            ),
+          ],
+          // ── Completed section ──
+          if (checked.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 20, 4, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_outline,
+                      size: 22, color: _checkedGreen),
+                  const SizedBox(width: 8),
+                  Text(
+                    'COMPLETED  (${checked.length})',
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: _checkedGreen,
+                      letterSpacing: 1.35,
                     ),
                   ),
-                );
-              }),
-              Divider(
-                height: 28,
-                color: Colors.white.withValues(alpha: 0.08),
+                ],
               ),
-            ],
-          );
-        },
+            ),
+            for (final item in checked)
+              _buildItemCard(context, item, theme),
+          ],
+        ],
       );
     }
 
@@ -879,7 +898,8 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
               PopupMenuItem(
                 value: 'delete',
                 child: ListTile(
-                  leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+                  leading: Icon(Icons.delete_outline,
+                      color: theme.colorScheme.error),
                   title: Text(
                     'Delete list',
                     style: TextStyle(color: theme.colorScheme.error),
@@ -897,9 +917,8 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
             : _error != null
                 ? Center(
                     child: Padding(
-                      padding: groceryPagePadding(context).add(
-                        const EdgeInsets.all(24),
-                      ),
+                      padding: groceryPagePadding(context)
+                          .add(const EdgeInsets.all(24)),
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
                           maxWidth: groceryMaxContentWidth(context),
@@ -913,120 +932,64 @@ class _GroceryListDetailScreenState extends State<GroceryListDetailScreen> {
                       ),
                     ),
                   )
-                : _items.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: groceryPagePadding(context).add(
-                            const EdgeInsets.all(24),
-                          ),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: groceryMaxContentWidth(context),
+                : Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: groceryMaxContentWidth(context),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // ── Progress header ──────────────────────────
+                          Padding(
+                            padding: groceryPagePadding(context).copyWith(
+                              top: 14,
+                              bottom: 10,
                             ),
                             child: Column(
-                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Icon(
-                                  Icons.shopping_basket_outlined,
-                                  size: 88,
-                                  color: theme.colorScheme.primary
-                                      .withValues(alpha: 0.55),
-                                ),
-                                const SizedBox(height: 20),
                                 Text(
-                                  'No items yet',
-                                  style: theme.textTheme.headlineMedium,
+                                  total == 0
+                                      ? '0 ingredients'
+                                      : '$done of $total ingredient${total == 1 ? '' : 's'}',
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Tap + to add your first item.',
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.bodyLarge
-                                      ?.copyWith(color: Colors.white60),
-                                ),
-                                const SizedBox(height: 28),
-                                Text(
-                                  '0 items • 0 done',
-                                  style: theme.textTheme.bodyMedium
-                                      ?.copyWith(color: Colors.white70),
-                                ),
-                                const SizedBox(height: 12),
-                                const GroceryProgressBar(value: 0),
+                                if (total > 0) ...[
+                                  const SizedBox(height: 10),
+                                  GroceryProgressBar(
+                                    value: progress,
+                                    height: 14,
+                                    semanticsLabel:
+                                        '$done of $total ingredients collected',
+                                  ),
+                                  if (remaining > 0) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '$remaining remaining',
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                              color: Colors.white70),
+                                    ),
+                                  ],
+                                ],
                               ],
                             ),
                           ),
-                        ),
-                      )
-                    : Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: groceryMaxContentWidth(context),
+                          // ── List body ────────────────────────────────
+                          Expanded(
+                            child: Padding(
+                              padding: groceryPagePadding(context),
+                              child: listBody(),
+                            ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Padding(
-                                padding: groceryPagePadding(context).copyWith(
-                                  top: 12,
-                                  bottom: 8,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Text(
-                                      '$total item${total == 1 ? '' : 's'} • $done done',
-                                      style: theme.textTheme.bodyLarge
-                                          ?.copyWith(
-                                        color: Colors.white70,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    GroceryProgressBar(
-                                      value: progress,
-                                      height: 14,
-                                      semanticsLabel: 'List completion',
-                                    ),
-                                    const SizedBox(height: 16),
-                                    SegmentedButton<_ListShopTab>(
-                                      segments: [
-                                        ButtonSegment<_ListShopTab>(
-                                          value: _ListShopTab.getIt,
-                                          label: Text('Get it ($getItCount)'),
-                                          icon: const Icon(
-                                            Icons.shopping_bag_outlined,
-                                            size: 20,
-                                          ),
-                                        ),
-                                        ButtonSegment<_ListShopTab>(
-                                          value: _ListShopTab.gotIt,
-                                          label: Text('Got it ($done)'),
-                                          icon: const Icon(
-                                            Icons.check_circle_outline,
-                                            size: 20,
-                                          ),
-                                        ),
-                                      ],
-                                      selected: {_shopTab},
-                                      onSelectionChanged: (s) {
-                                        if (s.isEmpty) return;
-                                        setState(() => _shopTab = s.first);
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: groceryPagePadding(context),
-                                  child: listBody(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        ],
                       ),
+                    ),
+                  ),
       ),
       floatingActionButton: Tooltip(
         message: 'Add item',
@@ -1277,7 +1240,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
                   : _step == _VoiceStep.category
                       ? 'Step 2 of 2 — Section'
                       : 'Done!',
-              style: const TextStyle(color: Colors.white60, fontSize: 18),
+              style: const TextStyle(color: Colors.white70, fontSize: 20),
             ),
             const SizedBox(height: 16),
 

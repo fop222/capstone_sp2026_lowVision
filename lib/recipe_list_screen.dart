@@ -132,7 +132,7 @@ class _RecipeListBody extends StatelessWidget {
                     // ── Surprise Me button ───────────────────────────────
                     Semantics(
                       button: true,
-                      label: 'Surprise Me – scan pantry and get recipe ideas',
+                      label: 'Surprise me with my ingredients – scan pantry and get recipe ideas',
                       child: _SurpriseMeButton(onTap: onOpenSurpriseMe),
                     ),
 
@@ -221,7 +221,7 @@ class _ImportButton extends StatelessWidget {
                   style: TextStyle(
                     color: kBrandPurpleLight,
                     fontWeight: FontWeight.w700,
-                    fontSize: 16,
+                    fontSize: 19,
                   ),
                 ),
               ],
@@ -268,11 +268,11 @@ class _SurpriseMeButton extends StatelessWidget {
                 const Text('✨', style: TextStyle(fontSize: 18)),
                 const SizedBox(width: 10),
                 const Text(
-                  'Surprise Me!',
+                  'Surprise me with my ingredients',
                   style: TextStyle(
                     color: Color(0xFF4DEBA0),
                     fontWeight: FontWeight.w700,
-                    fontSize: 16,
+                    fontSize: 19,
                   ),
                 ),
               ],
@@ -353,7 +353,7 @@ class _RecipeCard extends StatelessWidget {
                     child: Text(
                       'Imported',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 14,
                         color: kBrandPurpleLight,
                         fontWeight: FontWeight.w600,
                       ),
@@ -373,7 +373,7 @@ class _RecipeCard extends StatelessWidget {
                     child: const Text(
                       '✨ Suggested',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 14,
                         color: Color(0xFF4DEBA0),
                         fontWeight: FontWeight.w600,
                       ),
@@ -404,9 +404,9 @@ class _RecipeCard extends StatelessWidget {
                 Text(
                   '~${recipe.estimatedTimeMinutes} min',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 18,
                     color: kBrandPurpleLight,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -502,14 +502,8 @@ class _CardShell extends StatelessWidget {
             highlightColor: kBrandPurpleMid.withValues(alpha: 0.08),
             child: Ink(
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFF252344).withValues(alpha: 0.97),
-                    const Color(0xFF1A1D2E),
-                  ],
-                ),
+                // Single solid colour — no gradient.
+                color: const Color(0xFF1E2130),
                 border: Border.all(
                   color: Colors.white.withValues(alpha: 0.10),
                 ),

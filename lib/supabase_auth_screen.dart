@@ -212,6 +212,37 @@ class _SupabaseAuthScreenState extends State<SupabaseAuthScreen> {
                         const SizedBox(height: 20),
                       ],
                       if (_isSignup) ...[
+                        // Note: no email verification — account is ready immediately.
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: kBrandPurpleMid.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color:
+                                    kBrandPurpleLight.withValues(alpha: 0.4)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.info_outline_rounded,
+                                  size: 22, color: kBrandPurpleLight),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'No verification email will be sent. Your account is ready to use right away.',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: Colors.white,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 18),
                         TextFormField(
                           controller: _fullNameController,
                           decoration: const InputDecoration(

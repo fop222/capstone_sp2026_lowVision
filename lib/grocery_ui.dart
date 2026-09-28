@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 
@@ -16,7 +16,7 @@ EdgeInsets groceryPagePadding(BuildContext context) {
 
 double groceryMaxContentWidth(BuildContext context) => 560;
 
-/// Soft vertical gradient behind scrollable content (grocery-app “aisle lighting”).
+/// Solid dark-purple backdrop — single shade, no gradient.
 class GroceryAmbientBackdrop extends StatelessWidget {
   const GroceryAmbientBackdrop({super.key, required this.child});
 
@@ -27,19 +27,9 @@ class GroceryAmbientBackdrop extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                kBrandPurpleDeep.withValues(alpha: 0.35),
-                kBrandCanvas,
-                const Color(0xFF0D0C1F),
-              ],
-              stops: const [0.0, 0.45, 1.0],
-            ),
-          ),
+        // Single flat colour — no gradient, one shade of purple.
+        const DecoratedBox(
+          decoration: BoxDecoration(color: kBrandCanvas),
         ),
         CustomPaint(
           painter: _SoftGridPainter(
@@ -74,7 +64,7 @@ class _SoftGridPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// Glowing gradient progress (0–1). Used on list cards and detail header.
+/// Solid-fill progress bar (0-1). Used on list cards and detail header.
 class GroceryProgressBar extends StatelessWidget {
   const GroceryProgressBar({
     super.key,
@@ -116,16 +106,12 @@ class GroceryProgressBar extends StatelessWidget {
                   duration: const Duration(milliseconds: 420),
                   curve: Curves.easeOutCubic,
                   height: height,
-                  width: (constraints.maxWidth * v).clamp(0.0, constraints.maxWidth),
+                  width: (constraints.maxWidth * v)
+                      .clamp(0.0, constraints.maxWidth),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(height / 2),
-                    gradient: const LinearGradient(
-                      colors: [
-                        kBrandPurpleLight,
-                        kBrandPurpleMid,
-                        kBrandPurpleDeep,
-                      ],
-                    ),
+                    // Single solid purple — no gradient.
+                    color: kBrandPurpleMid,
                     boxShadow: [
                       BoxShadow(
                         color: kBrandPurpleMid.withValues(alpha: 0.55),
@@ -145,7 +131,7 @@ class GroceryProgressBar extends StatelessWidget {
   }
 }
 
-/// Header avatar: rounded “tile” with person glyph + glow (profile / grocery identity).
+/// Header avatar: rounded tile with person glyph + glow (profile / grocery identity).
 class GroceryProfilePersonBadge extends StatelessWidget {
   const GroceryProfilePersonBadge({super.key, this.size = 72});
 
@@ -159,15 +145,8 @@ class GroceryProfilePersonBadge extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(r),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            kBrandPurpleLight.withValues(alpha: 0.95),
-            kBrandPurpleMid,
-            kBrandPurpleDeep,
-          ],
-        ),
+        // Single solid purple — no gradient.
+        color: kBrandPurpleMid,
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.35),
           width: 1.5,
@@ -234,7 +213,7 @@ class GroceryGlowButton extends StatelessWidget {
   }
 }
 
-/// Polished list card shell (used on dashboard list tiles).
+/// Polished list card shell (used on dashboard list tiles). Solid colour, no gradient.
 class GroceryListCardShell extends StatelessWidget {
   const GroceryListCardShell({super.key, required this.child});
 
@@ -246,14 +225,8 @@ class GroceryListCardShell extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF252344).withValues(alpha: 0.95),
-            const Color(0xFF1A1D2E),
-          ],
-        ),
+        // Single solid dark colour — no gradient.
+        color: const Color(0xFF1E2130),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.1),
         ),
@@ -262,11 +235,6 @@ class GroceryListCardShell extends StatelessWidget {
             color: Colors.black.withValues(alpha: 0.35),
             blurRadius: 18,
             offset: const Offset(0, 8),
-          ),
-          BoxShadow(
-            color: kBrandPurpleMid.withValues(alpha: 0.12),
-            blurRadius: 24,
-            spreadRadius: -8,
           ),
         ],
       ),

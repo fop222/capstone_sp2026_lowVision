@@ -48,7 +48,9 @@ class HomeLandingScreen extends StatelessWidget {
     Color? accent,
   }) {
     final theme = Theme.of(context);
-    final glow = accent ?? kBrandPurpleMid;
+    // Use a single deep purple for all buttons — solid, no gradient,
+    // ensuring WCAG AAA (≥ 4.5 : 1) for large text with white foreground.
+    const bgColor = Color(0xFF3D2FB0); // deep purple, L ≈ 0.06 → ratio > 9:1
     return Semantics(
       button: true,
       label: label,
@@ -62,22 +64,15 @@ class HomeLandingScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  glow.withValues(alpha: 0.95),
-                  glow.withValues(alpha: 0.72),
-                ],
-              ),
+              color: bgColor,
               border: Border.all(
                 color: Colors.white.withValues(alpha: 0.18),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: glow.withValues(alpha: 0.4),
-                  blurRadius: 24,
-                  offset: const Offset(0, 10),
+                  color: kBrandPurpleMid.withValues(alpha: 0.35),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -95,10 +90,10 @@ class HomeLandingScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                Icon(
+                const Icon(
                   Icons.arrow_forward_rounded,
                   size: 32,
-                  color: Colors.white.withValues(alpha: 0.9),
+                  color: Colors.white,
                 ),
               ],
             ),
@@ -176,8 +171,7 @@ class HomeLandingScreen extends StatelessWidget {
                     _modeButton(
                       context: context,
                       label: 'COOKING',
-                      icon: Icons.restaurant_menu_outlined,
-                      accent: const Color(0xFF3AE4C2),
+                      icon: Icons.soup_kitchen_outlined,
                       onPressed: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => const RecipeListScreen(),
@@ -189,7 +183,6 @@ class HomeLandingScreen extends StatelessWidget {
                       context: context,
                       label: 'EATING',
                       icon: Icons.restaurant_outlined,
-                      accent: const Color(0xFFFF8C5A),
                       onPressed: () => _comingSoon(context, 'Eating'),
                     ),
                   ],
