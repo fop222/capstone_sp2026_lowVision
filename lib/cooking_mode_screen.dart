@@ -184,8 +184,12 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       await AppSpeech.I.stt.listen(
         onResult: (result) {
           if (!mounted) return;
-          recognized = result.recognizedWords;
-          setState(() => _listenTranscript = recognized);
+          // Never overwrite a good result with an empty string —
+          // Chrome fires a trailing empty final event after a pause.
+          if (result.recognizedWords.isNotEmpty) {
+            recognized = result.recognizedWords;
+            setState(() => _listenTranscript = recognized);
+          }
         },
         listenFor: const Duration(seconds: 30),
         pauseFor: const Duration(seconds: 10),
@@ -197,6 +201,8 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
         ),
       );
     } catch (_) {
+      // Swallow start errors (e.g. "recognition already started") —
+      // the caller loop will retry after a delay.
       if (mounted) {
         setState(() {
           _listening = false;
@@ -341,8 +347,14 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
       if (mounted) setState(() => _waitingConfirm = false);
 
-      // No speech detected → restart listening silently (no message).
-      if (heard.isEmpty) continue;
+      // No speech detected — wait for the browser to fully reset the
+      // SpeechRecognition session before restarting (avoids rapid cycling
+      // between "Waiting…" and "Listening…" on web).
+      if (heard.isEmpty) {
+        await Future.delayed(
+            Duration(milliseconds: kIsWeb ? 1500 : 500));
+        continue;
+      }
 
       final verdict = _classifyResponse(heard);
       switch (verdict) {
