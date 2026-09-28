@@ -661,15 +661,17 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         await AppSpeech.I.stt.stop();
       }
 
+      // On web, allow a short window for any final STT event to arrive.
+      // Previously 2500 ms — reduced to 600 ms for faster voice check-off UX.
       if (kIsWeb) {
-        await Future<void>.delayed(const Duration(milliseconds: 2500));
+        await Future<void>.delayed(const Duration(milliseconds: 600));
       }
     } finally {
       _stopAisleListenRequested = null;
       if (AppSpeech.I.stt.isListening) {
         await AppSpeech.I.stt.stop();
       }
-      await Future<void>.delayed(Duration(milliseconds: kIsWeb ? 800 : 400));
+      await Future<void>.delayed(Duration(milliseconds: kIsWeb ? 400 : 200));
     }
 
     return recognized.trim();
@@ -2047,16 +2049,44 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 onPartial: (p) {
                   if (ctx.mounted) setModal(() => partial = p);
                 },
-                pauseFor: const Duration(seconds: 3),
+                pauseFor: const Duration(seconds: 2),
                 silentErrors: true,
               );
               if (!ctx.mounted) return;
-              heard = transcript.trim();
-              // If still nothing, loop silently — no error message.
+              // CRITICAL FIX: on some platforms (especially web) the STT engine
+              // fires a final-result event with empty words even after the user
+              // spoke clearly. The partial callback already captured the spoken
+              // text into [partial], so use it as a fallback when transcript is
+              // empty. Without this, [heard] stays '' and the loop never exits
+              // even though "Yogurt. Yogurt." was clearly recognised.
+              heard = transcript.trim().isNotEmpty
+                  ? transcript.trim()
+                  : partial.trim();
+              // If still nothing after both sources, loop silently.
             }
 
             final unchecked = _items.where((item) => !item.isChecked).toList();
-            final found = _matchSpokenToItems(heard, unchecked);
+            var found = _matchSpokenToItems(heard, unchecked);
+
+            // If nothing matched in unchecked items, check if it's already
+            // checked off — so we can give the user a helpful "already got it"
+            // message instead of a confusing "no match found."
+            if (found.isEmpty) {
+              final alreadyChecked = _matchSpokenToItems(
+                  heard, _items.where((i) => i.isChecked).toList());
+              if (alreadyChecked.isNotEmpty && ctx.mounted) {
+                final name = alreadyChecked.first.name;
+                setModal(() {
+                  phase = _TactileDialogPhase.noMatch;
+                  partial = heard;
+                  transcript = heard;
+                });
+                await _speak(
+                  '$name is already checked off your list.',
+                );
+                return;
+              }
+            }
 
             if (found.isEmpty) {
               setModal(() {
@@ -2066,7 +2096,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
               });
               if (ctx.mounted) {
                 await _speak(
-                  'I could not match that to your shopping list. '
+                  'I could not match "$heard" to your shopping list. '
                   'Please try again or scan another area.',
                 );
               }
@@ -2168,6 +2198,17 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                   ),
                 ),
               const SizedBox(height: 20),
+              // Primary action: use what was already captured and match it now.
+              if (partial.isNotEmpty)
+                _checkOffAnswerBox(
+                  label: 'Match "${partial.split(' ').take(4).join(' ')}"',
+                  borderColor: const Color(0xFF3AE4C2),
+                  onTap: () {
+                    final stop = _stopAisleListenRequested;
+                    if (stop != null && !stop.isCompleted) stop.complete();
+                  },
+                ),
+              if (partial.isNotEmpty) const SizedBox(height: 10),
               _checkOffAnswerBox(
                 label: 'Stop Listening',
                 borderColor: const Color(0xFF6D5EF5),
