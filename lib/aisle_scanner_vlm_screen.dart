@@ -937,19 +937,23 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   /// Formats the open-ended pantry VLM response into a clean bullet list.
   /// e.g. "Greek Yogurt\nMilk" → "• Greek Yogurt\n• Milk"
   String _pantryDetectedDisplay(String vlmAnswer) {
-    final lines = vlmAnswer
-        .split(RegExp(r'\r?\n'))
-        .map((l) => l.trim().replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), ''))
-        .where((l) {
-          if (l.isEmpty) return false;
-          // Strip the "| location" suffix to check just the food name.
-          final foodPart = l.contains('|') ? l.split('|').first.trim() : l;
-          if (foodPart.toUpperCase() == 'NONE') return false;
-          if (foodPart.toUpperCase() == 'NO ITEMS FOUND') return false;
-          return true;
-        })
-        .toSet() // deduplicate
-        .toList();
+    // Deduplicate by food-name only (not full "Name | location" string),
+    // so "Bok Choy | middle" and "Bok Choy |" collapse to one entry.
+    final seenFoodNames = <String>{};
+    final lines = <String>[];
+    for (final raw in vlmAnswer.split(RegExp(r'\r?\n'))) {
+      final l = raw.trim().replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), '');
+      if (l.isEmpty) continue;
+      final foodPart = (l.contains('|') ? l.split('|').first : l).trim();
+      final foodUpper = foodPart.toUpperCase();
+      // Never display NONE or NO ITEMS FOUND as a food item.
+      if (foodUpper == 'NONE' || foodUpper.startsWith('NO ITEMS FOUND')) continue;
+      if (foodPart.isEmpty) continue;
+      // Only show each food name once.
+      if (seenFoodNames.contains(foodUpper)) continue;
+      seenFoodNames.add(foodUpper);
+      lines.add(foodPart); // show only the name, no location suffix
+    }
     if (lines.isEmpty) return '';
     return lines.map((l) => '• $l').join('\n');
   }
@@ -1232,6 +1236,9 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         '${normalizedTargets.map((item, name) => MapEntry(item.name, name))}',
       );
     }
+    // Deduplicate by food name before matching so "Bok Choy | middle" and
+    // "Bok Choy |" don't both get processed (only the first is kept).
+    final seenFoodNames = <String>{};
     final lines = answer
         .split(RegExp(r'\r?\n'))
         .map((l) => l.trim())
@@ -1240,8 +1247,14 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
           if (l.isEmpty) return false;
           if (l.endsWith(':')) return false;
           // Skip lines whose food-name part is literally "NONE" (model sentinel).
-          final foodPart = l.contains('|') ? l.split('|').first.trim() : l;
-          if (foodPart.toUpperCase() == 'NONE') return false;
+          final foodPart =
+              (l.contains('|') ? l.split('|').first : l).trim().toUpperCase();
+          if (foodPart == 'NONE' || foodPart.startsWith('NO ITEMS FOUND')) {
+            return false;
+          }
+          // Deduplicate by food name.
+          if (seenFoodNames.contains(foodPart)) return false;
+          seenFoodNames.add(foodPart);
           return true;
         });
 
