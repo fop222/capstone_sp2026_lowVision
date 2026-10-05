@@ -357,16 +357,9 @@ const _kShelfSceneGatePreamble =
     'respond with exactly this single line and nothing else: NO ITEMS FOUND\n'
     'If it does show appropriate shelving, continue:\n';
 
-/// Gate preamble for Pantry / Fridge mode — accepts home storage and close-up
-/// photos of loose or bagged food instead of requiring a retail store shelf.
-const _kPantrySceneGatePreamble =
-    'First, decide whether this photo clearly shows food items, beverages, grocery products, '
-    'or a close-up of produce being photographed for a pantry or refrigerator check. '
-    'Accept produce inside clear or translucent plastic bags even when no shelf is visible. '
-    'If it shows anything completely unrelated to food storage (such as a vehicle interior, '
-    'outdoor scenery, people, pets, or a completely empty surface with no products), '
-    'respond with exactly this single line and nothing else: NO ITEMS FOUND\n'
-    'If it does show food or grocery products, continue:\n';
+/// Gate preamble for Pantry / Fridge mode.
+/// Kept intentionally short — long preambles confuse small local VLM models.
+const _kPantrySceneGatePreamble = '';
 
 /// Shelf-scan VLM: fixed labels per product; omit optional lines when unknown.
 const _kShelfStructuredFormat =
@@ -1255,21 +1248,38 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       if (cleaned.isEmpty) continue;
 
       final normalizedDetected = normalizePantryFoodName(cleaned);
-      final candidates = targets
-          .where((target) => normalizedTargets[target] == normalizedDetected)
-          .toList();
+      // Fuzzy matching: exact → substring → token overlap.
+      // This lets "celery stalks" match a shopping-list item named "Celery",
+      // and "whole carrots" match "Carrots", etc.
+      final candidates = targets.where((target) {
+        final t = normalizedTargets[target]!;
+        if (t == normalizedDetected) return true;
+        if (t.contains(normalizedDetected) || normalizedDetected.contains(t)) {
+          return true;
+        }
+        // Token-level overlap (≥ 3-char tokens)
+        final tToks = t.split(' ').where((w) => w.length >= 3).toSet();
+        final dToks =
+            normalizedDetected.split(' ').where((w) => w.length >= 3).toSet();
+        return tToks.intersection(dToks).isNotEmpty;
+      }).toList();
       if (kDebugMode) {
         debugPrint(
           '[pantry-debug] detected="$cleaned" normalized="$normalizedDetected" '
           'candidates=${candidates.map((item) => item.name).toList()}',
         );
-        if (candidates.length != 1) {
-          debugPrint('[pantry-debug] rejected candidate: $cleaned');
+        if (candidates.isEmpty) {
+          debugPrint('[pantry-debug] no match for: $cleaned');
         }
       }
-      // Do not choose arbitrarily when two unchecked entries normalize alike.
-      if (candidates.length != 1 || found.contains(candidates.single)) continue;
-      final target = candidates.single;
+      // Prefer an exact match when multiple candidates fuzzy-match.
+      final exactCandidates = candidates
+          .where((t) => normalizedTargets[t] == normalizedDetected)
+          .toList();
+      final best = exactCandidates.isNotEmpty ? exactCandidates : candidates;
+      // Skip if ambiguous (two list items equally likely) or already found.
+      if (best.length != 1 || found.contains(best.single)) continue;
+      final target = best.single;
       found.add(target);
       if (location.isNotEmpty) _lastPantryLocations[target.id] = location;
     }
@@ -1491,44 +1501,22 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       // Open-ended detection: ask WHAT is visible AND where, then cross-reference
       // the answer against targets client-side.
       // This prevents the model from hallucinating items it was primed to find.
+      // Short, direct prompt — long prompts confuse small local VLM models.
       question =
-          gatePreamble +
-          'Look carefully at this photo of a refrigerator, pantry, or kitchen cabinet. '
-          'Your goal is to identify every food item you can see with reasonable confidence. '
-          'Be inclusive: it is better to report an item you are 60% sure about than to miss it entirely. '
-          '\n\n'
-          'BAGGED PRODUCE — special rules (highest priority):\n'
-          'If you see any bag, pouch, or clear plastic that contains or appears to contain vegetables, '
-          'fruit, or other produce, report it using ALL available evidence in this order:\n'
-          '1. READ the largest text on the bag — vegetable names printed on packaging are reliable identifiers. '
-          '   A bag labeled "CARROTS", "LETTUCE", "POTATOES", "BOK CHOY", "CELERY", or "BELL PEPPERS" '
-          '   should almost always be reported as that vegetable.\n'
-          '2. LOOK AT THE COLOR AND SHAPE of the contents visible through the bag: '
-          '   orange elongated shapes = Carrots; '
-          '   shredded or leafy green/white mass = Lettuce; '
-          '   brown, tan, or russet oval lumps = Potatoes; '
-          '   pale ribbed green stalks = Celery; '
-          '   pale stems with dark-green leaves = Bok Choy; '
-          '   smooth lobed bodies in green, red, yellow, or orange = Bell Peppers.\n'
-          '3. If the bag is opaque but labeled with a vegetable name, report that vegetable — '
-          '   packaged produce bags reliably contain what they say.\n'
-          '4. If a bag clearly contains vegetables but you cannot read the label and cannot '
-          '   determine the exact type, report it as "Vegetables".\n'
-          '\n'
-          'NON-BAGGED ITEMS: Identify from visual appearance (shape, color, texture). '
-          'For non-produce packaged goods (bottles, cans, boxes) you may use brand or label text '
-          'as supporting evidence alongside visual appearance. '
-          'Never return a brand name, slogan, or marketing phrase — return only the food name '
-          '(e.g. "Carrots" not "Whole Carrots Fresh Harvest", "Milk" not "2% Reduced Fat Milk"). '
-          '\n\n'
-          'Format — for each item write exactly one line:\n'
-          'ItemName | region\n'
-          'Regions: top left, top, top right, middle left, middle, middle right, bottom left, bottom, bottom right\n'
-          'Example:\n'
-          'Carrots | bottom left\n'
-          'Lettuce | middle\n'
-          'Potatoes | bottom right\n'
-          'If after careful inspection you genuinely cannot identify any food item, write exactly: NONE';
+          'Look at this image and list every food item, vegetable, or fruit you can see.\n'
+          'Use the text printed on bags and packages as a strong clue — if a bag says '
+          '"CARROTS" it is carrots, if it says "CELERY" it is celery, etc.\n'
+          'Also use color and shape: orange elongated = Carrots; green ribbed stalks = Celery; '
+          'shredded green/white = Lettuce; brown/tan lumps = Potatoes; '
+          'pale stems + dark leaves = Bok Choy; lobed green/red/yellow/orange = Bell Peppers.\n'
+          'For each item write one line: FoodName | location\n'
+          'Location is one of: top left, top, top right, middle left, middle, '
+          'middle right, bottom left, bottom, bottom right\n'
+          'Example output:\n'
+          'Celery | middle left\n'
+          'Carrots | bottom\n'
+          'Use only the simple food name — no brand names, no extra words.\n'
+          'If you see no food at all, write: NONE';
     } else if (targets.isEmpty) {
       question =
           gatePreamble +
@@ -1606,8 +1594,13 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     if (multiShelf) {
       final wanted = _englishNameList(targets.map((e) => e.name).toList());
       if (foundTargets.isEmpty) {
+        // Show what the VLM actually saw so the user can understand why.
+        final rawDisplay = _pantryDetectedDisplay(vlmAnswer);
+        final rawNote = (widget.pantryMode && rawDisplay.isNotEmpty)
+            ? '\nModel saw: $rawDisplay'
+            : '';
         shelfUser = widget.pantryMode
-            ? 'Could not confirm $wanted in your pantry or fridge. Tap Scan Shelves to try again.'
+            ? 'Could not confirm $wanted in your pantry or fridge. Tap Scan Shelves to try again.$rawNote'
             : 'Could not confirm $wanted on this shelf. Tap Scan Shelf to try again.';
       } else {
         if (widget.pantryMode) {
