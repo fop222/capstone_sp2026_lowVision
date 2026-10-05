@@ -162,24 +162,23 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       final encodedBody    = Uri.encodeQueryComponent(body);
 
       // ── Fallback chain: mailto → Gmail → Outlook ──────────────────────────
-      // Open Gmail app only (googlemail:// = native Gmail on Android/iOS)
+      // Open Gmail app directly via its URI scheme.
+      // Note: canLaunchUrl returns false for custom schemes on Android unless
+      // declared in <queries>, so we skip the check and launch directly.
       final gmailUri = Uri.parse(
         'googlegmail://co?subject=$encodedSubject&body=$encodedBody',
       );
 
       bool launched = false;
       try {
-        if (await canLaunchUrl(gmailUri)) {
-          await launchUrl(gmailUri, mode: LaunchMode.externalApplication);
-          launched = true;
-        }
+        launched = await launchUrl(gmailUri, mode: LaunchMode.externalApplication);
       } catch (_) {}
 
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Gmail app not found. Please install Gmail and try again.',
+              'Could not open Gmail. Make sure the Gmail app is installed.',
             ),
             duration: Duration(seconds: 4),
           ),

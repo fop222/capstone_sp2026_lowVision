@@ -14,7 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
-import 'gemini_service.dart' show extractRecipeFromScreenshots, kGeminiApiKey;
+import 'gemini_service.dart' show extractRecipeFromScreenshots;
 import 'grocery_ui.dart';
 import 'imported_recipes_state.dart';
 import 'ocr_config.dart';
@@ -198,16 +198,6 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
     });
 
     try {
-      if (kGeminiApiKey.isEmpty) {
-        setState(() {
-          _screenshotError =
-              'Recipe screenshot import requires a Gemini API key. '
-              'Ask the app admin to set GEMINI_API_KEY at build time.';
-          _screenshotLoading = false;
-        });
-        return;
-      }
-
       final recipe = await extractRecipeFromScreenshots(
         imageBytes,
         mimeTypes: mimeTypes,
