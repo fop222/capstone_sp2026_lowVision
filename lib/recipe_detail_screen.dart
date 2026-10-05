@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'cooking_prep_screen.dart';
 import 'grocery_list_screen.dart';
@@ -23,6 +24,7 @@ class RecipeDetailScreen extends StatefulWidget {
 
 class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
   bool _startingShop = false;
+  bool _sendingEmail = false;
 
   Recipe get recipe => widget.recipe;
 
@@ -80,6 +82,116 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       );
     } finally {
       if (mounted) setState(() => _startingShop = false);
+    }
+  }
+
+  // ── Share by email ─────────────────────────────────────────────────────────
+
+  Future<void> _shareByEmail() async {
+    setState(() => _sendingEmail = true);
+    try {
+      final r = recipe;
+
+      // ── Subject ──────────────────────────────────────────────────────────
+      final subject = 'Check out the recipe for "${r.name}"';
+
+      // ── Body ──────────────────────────────────────────────────────────────
+      final buf = StringBuffer();
+
+      buf.writeln('Hi,');
+      buf.writeln();
+      buf.writeln(
+        'I wanted to share with you a recipe on the Lumio app, '
+        'developed by Lehigh University CS Students.',
+      );
+      buf.writeln();
+      buf.writeln(r.name);
+      buf.writeln();
+
+      // Meta
+      final timeStr = r.estimatedTimeMinutes > 0
+          ? '~${r.estimatedTimeMinutes} min'
+          : 'Unknown';
+      buf.writeln('Time: $timeStr');
+
+      final allergensStr =
+          r.allergens.isEmpty ? 'None' : r.allergens.join(', ');
+      buf.writeln('Allergens: $allergensStr');
+
+      final dietStr = r.displayDietaryPreferences.isEmpty
+          ? 'No Restrictions'
+          : r.displayDietaryPreferences.join(', ');
+      buf.writeln('Dietary Preference: $dietStr');
+
+      // Ingredients
+      buf.writeln();
+      buf.writeln('Ingredients:');
+      if (r.ingredients.isEmpty) {
+        buf.writeln('  (No ingredients listed)');
+      } else {
+        for (final ing in r.ingredients) {
+          final qty =
+              ing.quantity.isNotEmpty ? ' — ${ing.quantity}' : '';
+          buf.writeln('  - ${ing.name}$qty');
+        }
+      }
+
+      // Tools
+      if (r.tools.isNotEmpty) {
+        buf.writeln();
+        buf.writeln('Tools:');
+        for (final tool in r.tools) {
+          buf.writeln('  - $tool');
+        }
+      }
+
+      // Steps — included in email only, NOT shown on the detail page
+      if (r.steps.isNotEmpty) {
+        buf.writeln();
+        buf.writeln('Steps:');
+        for (int i = 0; i < r.steps.length; i++) {
+          buf.writeln('  ${i + 1}. ${r.steps[i]}');
+        }
+      }
+
+      final body = buf.toString().trimRight();
+
+      // ── Build mailto URI ──────────────────────────────────────────────────
+      // Use Uri.encodeQueryComponent so spaces become %20 (not +), which is
+      // correct for mailto: URIs.
+      final encodedSubject = Uri.encodeQueryComponent(subject);
+      final encodedBody = Uri.encodeQueryComponent(body);
+      final mailtoUri =
+          Uri.parse('mailto:?subject=$encodedSubject&body=$encodedBody');
+
+      // ── Launch ────────────────────────────────────────────────────────────
+      if (!await canLaunchUrl(mailtoUri)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No email app found. Please set up an email account on '
+              'this device and try again.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
+
+      await launchUrl(mailtoUri);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not open the email app. Please try again.',
+          ),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sendingEmail = false);
     }
   }
 
@@ -331,6 +443,48 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
                           const SizedBox(width: 10),
                           const Text('Start Cooking'),
                         ],
+                      ),
+                    ),
+
+                    // ── Send Recipe to Friend ───────────────────────────────
+                    const SizedBox(height: 14),
+                    Semantics(
+                      button: true,
+                      label: 'Send recipe for ${recipe.name} to a friend by email',
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _sendingEmail ? null : _shareByEmail,
+                          icon: _sendingEmail
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: kBrandPurpleLight,
+                                  ),
+                                )
+                              : const Icon(Icons.email_outlined, size: 22),
+                          label: const Text(
+                            'Send Recipe to Friend',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kBrandPurpleLight,
+                            side: BorderSide(
+                              color: kBrandPurpleLight.withValues(alpha: 0.7),
+                              width: 2,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 16, horizontal: 20),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ],
