@@ -123,15 +123,14 @@ class _RecipeListBody extends StatelessWidget {
                       ),
                     ),
 
-                    // ── Import button ────────────────────────────────────
+                    // ── Import + Surprise Me buttons ─────────────────────
                     const SizedBox(height: 20),
                     Semantics(
                       button: true,
-                      label: 'Import recipe from a website link',
+                      label: 'Import a recipe from a URL or screenshots',
                       child: _ImportButton(onTap: onOpenImport),
                     ),
                     const SizedBox(height: 10),
-                    // ── Surprise Me button ───────────────────────────────
                     Semantics(
                       button: true,
                       label: 'Surprise me with my ingredients – scan pantry and get recipe ideas',
@@ -214,16 +213,20 @@ class _ImportButton extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.link_rounded, color: kBrandPurpleLight, size: 20),
+                Icon(Icons.upload_file_rounded, color: kBrandPurpleLight, size: 20),
                 const SizedBox(width: 10),
-                Text(
-                  'Import Recipe from Link',
-                  style: TextStyle(
-                    color: kBrandPurpleLight,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 19,
+                Flexible(
+                  child: Text(
+                    'Import Recipe',
+                    style: TextStyle(
+                      color: kBrandPurpleLight,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
               ],
@@ -265,16 +268,20 @@ class _SurpriseMeButton extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Text('✨', style: TextStyle(fontSize: 18)),
                 const SizedBox(width: 10),
-                const Text(
-                  'Surprise me with my ingredients',
-                  style: TextStyle(
-                    color: Color(0xFF4DEBA0),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 19,
+                const Flexible(
+                  child: Text(
+                    'Surprise me with my ingredients',
+                    style: TextStyle(
+                      color: Color(0xFF4DEBA0),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 17,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
               ],
