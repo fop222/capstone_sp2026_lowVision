@@ -1,9 +1,11 @@
-/// Gemini API integration for the "Surprise Me!" recipe suggestion feature.
+/// Gemini API integration for recipe suggestions and screenshot extraction.
 library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'imported_recipes_state.dart' show kImportedCategory;
@@ -375,4 +377,252 @@ String _asString(dynamic value) {
   if (value == null) return '';
   if (value is String) return value;
   return value.toString();
+}
+
+// ── Screenshot → Recipe extraction ───────────────────────────────────────────
+
+/// Sends one or more recipe screenshot images to Gemini Vision and returns
+/// a fully populated [Recipe], or null if extraction fails.
+///
+/// [mimeTypes] should be a parallel list of MIME types for each image bytes
+/// entry (e.g. 'image/jpeg', 'image/png'). Defaults to 'image/jpeg'.
+Future<Recipe?> extractRecipeFromScreenshots(
+  List<Uint8List> imageBytesList, {
+  List<String>? mimeTypes,
+}) async {
+  if (kGeminiApiKey.isEmpty) {
+    debugPrint(
+      '[Gemini-screenshot] GEMINI_API_KEY missing — '
+      'pass it with --dart-define=GEMINI_API_KEY=your_key',
+    );
+    return null;
+  }
+  if (imageBytesList.isEmpty) return null;
+
+  const prompt =
+      'You are a recipe extraction assistant for a low-vision cooking app. '
+      'The user has provided one or more screenshots of a recipe — a single recipe '
+      'may span several images. Combine all visible information into ONE recipe.\n\n'
+      'Rules:\n'
+      '- Merge content across all screenshots; remove obvious duplicates from overlap.\n'
+      '- Preserve exact quantities and measurements shown in the images.\n'
+      '- Do NOT invent information not visible in the images.\n'
+      '- Return ONLY a valid JSON object — no markdown fences, no explanation.\n\n'
+      'Required JSON format:\n'
+      '{\n'
+      '  "name": "Recipe Name",\n'
+      '  "estimatedTimeMinutes": 30,\n'
+      '  "difficulty": 2,\n'
+      '  "dietaryPreferences": [],\n'
+      '  "allergens": [],\n'
+      '  "ingredients": [\n'
+      '    {"name": "flour", "quantity": "2 cups"}\n'
+      '  ],\n'
+      '  "steps": [\n'
+      '    "Preheat oven to 350°F.",\n'
+      '    "Mix flour and butter in a bowl."\n'
+      '  ]\n'
+      '}\n\n'
+      'Field rules:\n'
+      '- name: recipe title string.\n'
+      '- estimatedTimeMinutes: total time in minutes (integer, default 30).\n'
+      '- difficulty: 1–5 integer (1=easy, 5=very hard, default 2).\n'
+      '- dietaryPreferences: e.g. ["Vegetarian","Gluten-Free"] or [].\n'
+      '- allergens: e.g. ["Dairy","Eggs","Wheat / Gluten","Nuts","Soy"] or [].\n'
+      '- ingredients: [{name, quantity}] — quantity is "" when not shown.\n'
+      '- steps: array of instruction strings, or [] if no steps are visible.';
+
+  // Build multimodal parts: prompt text + one inlineData block per image.
+  final parts = <Map<String, dynamic>>[
+    {'text': prompt},
+  ];
+  for (int i = 0; i < imageBytesList.length; i++) {
+    final mime = (mimeTypes != null && i < mimeTypes.length)
+        ? mimeTypes[i]
+        : 'image/jpeg';
+    parts.add({
+      'inlineData': {
+        'mimeType': mime,
+        'data': base64Encode(imageBytesList[i]),
+      },
+    });
+  }
+
+  String _buildBody({bool withJsonMime = true}) {
+    final genConfig = <String, dynamic>{
+      'temperature': 0.2,
+      'maxOutputTokens': 4096,
+    };
+    if (withJsonMime) genConfig['responseMimeType'] = 'application/json';
+    return jsonEncode({
+      'contents': [
+        {'parts': parts},
+      ],
+      'generationConfig': genConfig,
+    });
+  }
+
+  final bodyWithMime = _buildBody();
+  final bodyWithoutMime = _buildBody(withJsonMime: false);
+
+  for (int pass = 1; pass <= 2; pass++) {
+    if (pass == 2) {
+      debugPrint('[Gemini-screenshot] All models busy; waiting 5s…');
+      await Future.delayed(const Duration(seconds: 5));
+    }
+    for (final model in _kGeminiModels) {
+      // Try with responseMimeType first, then without (some models reject it).
+      var recipe = await _requestScreenshotRecipe(
+        model: model,
+        body: bodyWithMime,
+      );
+      if (recipe == null) {
+        recipe = await _requestScreenshotRecipe(
+          model: model,
+          body: bodyWithoutMime,
+        );
+      }
+      if (recipe != null) return recipe;
+    }
+  }
+  return null;
+}
+
+Future<Recipe?> _requestScreenshotRecipe({
+  required String model,
+  required String body,
+}) async {
+  final uri = Uri.parse(
+    '$_kGeminiBase$model:generateContent?key=$kGeminiApiKey',
+  );
+  try {
+    debugPrint('[Gemini-screenshot] Trying $model…');
+    final resp = await http
+        .post(uri, headers: {'Content-Type': 'application/json'}, body: body)
+        .timeout(const Duration(seconds: 90));
+
+    if (resp.statusCode == 200) {
+      return _parseScreenshotRecipe(resp.body);
+    }
+    if (resp.statusCode == 404 || resp.statusCode == 503 ||
+        resp.statusCode == 429) {
+      debugPrint('[Gemini-screenshot] $model → ${resp.statusCode}; skipping.');
+      return null;
+    }
+    debugPrint('[Gemini-screenshot] $model HTTP ${resp.statusCode}');
+    return null;
+  } on TimeoutException {
+    debugPrint('[Gemini-screenshot] $model timed out.');
+    return null;
+  } catch (e) {
+    debugPrint('[Gemini-screenshot] $model error: $e');
+    return null;
+  }
+}
+
+Recipe? _parseScreenshotRecipe(String responseBody) {
+  try {
+    final decoded = jsonDecode(responseBody) as Map<String, dynamic>;
+    final candidates = decoded['candidates'] as List?;
+    if (candidates == null || candidates.isEmpty) return null;
+
+    final content = (candidates.first as Map<String, dynamic>)['content']
+        as Map<String, dynamic>?;
+    final parts = content?['parts'] as List?;
+    if (parts == null || parts.isEmpty) return null;
+
+    var rawText = parts
+        .map((p) =>
+            p is Map && p['text'] is String ? p['text'] as String : '')
+        .join()
+        .trim();
+
+    if (rawText.startsWith('```')) {
+      rawText = rawText.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
+      rawText = rawText.replaceFirst(RegExp(r'\s*```$'), '');
+    }
+
+    final map = jsonDecode(rawText);
+    if (map is! Map) return null;
+
+    final id = 'screenshot_${DateTime.now().millisecondsSinceEpoch}';
+    return _recipeFromScreenshotMap(Map<String, dynamic>.from(map), id: id);
+  } catch (e) {
+    debugPrint('[Gemini-screenshot] parse error: $e');
+    return null;
+  }
+}
+
+/// Maps a Gemini JSON response to a [Recipe] for screenshot-imported recipes.
+/// Parses allergens (which [_recipeFromMap] does not) and sets [isImported].
+Recipe _recipeFromScreenshotMap(
+  Map<String, dynamic> m, {
+  required String id,
+}) {
+  String s(String key) => _asString(m[key]).trim();
+  int i(String key, int fallback) {
+    final v = m[key];
+    if (v is int) return v;
+    if (v is double) return v.round();
+    if (v is String) return int.tryParse(v) ?? fallback;
+    return fallback;
+  }
+
+  final ingredients = <RecipeIngredient>[];
+  final rawIngs = m['ingredients'];
+  if (rawIngs is List) {
+    for (final item in rawIngs) {
+      if (item is Map) {
+        final name = _asString(item['name']).trim();
+        final qty = _asString(item['quantity']).trim();
+        if (name.isNotEmpty) ingredients.add(RecipeIngredient(name, quantity: qty));
+      } else {
+        final name = _asString(item).trim();
+        if (name.isNotEmpty) ingredients.add(RecipeIngredient(name));
+      }
+    }
+  }
+
+  final steps = <String>[];
+  final rawSteps = m['steps'];
+  if (rawSteps is List) {
+    for (final step in rawSteps) {
+      final text = _asString(step).trim();
+      if (text.isNotEmpty) steps.add(text);
+    }
+  }
+
+  final dietaryPrefs = <String>[];
+  final rawDiet = m['dietaryPreferences'];
+  if (rawDiet is List) {
+    for (final pref in rawDiet) {
+      final text = _asString(pref).trim();
+      if (text.isNotEmpty) dietaryPrefs.add(text);
+    }
+  }
+  if (dietaryPrefs.isEmpty) dietaryPrefs.add('No Restrictions');
+
+  final allergens = <String>[];
+  final rawAllergens = m['allergens'];
+  if (rawAllergens is List) {
+    for (final allergen in rawAllergens) {
+      final text = _asString(allergen).trim();
+      if (text.isNotEmpty) allergens.add(text);
+    }
+  }
+
+  final name = s('name');
+  return Recipe(
+    id: id,
+    name: name.isEmpty ? 'Imported Recipe' : name,
+    category: kImportedCategory,
+    estimatedTimeMinutes: i('estimatedTimeMinutes', 30),
+    difficulty: i('difficulty', 2).clamp(1, 5),
+    dietaryPreferences: dietaryPrefs,
+    allergens: allergens,
+    ingredients: ingredients,
+    tools: const [], // caller populates from /extract-tools
+    steps: steps,
+    isImported: true,
+  );
 }

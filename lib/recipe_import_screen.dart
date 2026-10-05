@@ -1,19 +1,25 @@
-/// Import a recipe from a public URL.
+/// Import a recipe from a public URL **or** from one or more screenshots.
 ///
-/// Fetches the page via a CORS proxy, looks for schema.org/Recipe JSON-LD,
-/// shows a preview, and—on confirmation—adds the recipe to the session-only
-/// [importedRecipesNotifier].
+/// URL path:       fetches HTML → parses JSON-LD → /extract-tools → preview
+/// Screenshot path: Gemini Vision (multi-image) → /extract-tools → preview
+///
+/// Both paths produce the same preview card and navigate to [RecipeDetailScreen]
+/// on confirmation.
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
+import 'gemini_service.dart' show extractRecipeFromScreenshots, kGeminiApiKey;
 import 'grocery_ui.dart';
 import 'imported_recipes_state.dart';
 import 'ocr_config.dart';
 import 'recipe_data.dart';
+import 'recipe_detail_screen.dart';
 
 // ─── Public entry-point ───────────────────────────────────────────────────────
 
@@ -27,13 +33,23 @@ class RecipeImportScreen extends StatefulWidget {
 // ─── State ────────────────────────────────────────────────────────────────────
 
 class _RecipeImportScreenState extends State<RecipeImportScreen> {
+  // ── URL import ─────────────────────────────────────────────────────────────
   final _urlController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  bool _urlLoading = false;
+  String _urlLoadingMessage = 'Fetching recipe…';
+  String? _urlError;
+  Recipe? _urlPreview;
 
-  bool _loading = false;
-  String _loadingMessage = 'Fetching recipe…';
-  String? _error;
-  Recipe? _preview;
+  // ── Screenshot import ──────────────────────────────────────────────────────
+  final _picker = ImagePicker();
+  List<XFile> _selectedImages = [];
+  /// index → bytes, pre-loaded for thumbnail display
+  final Map<int, Uint8List> _thumbnailCache = {};
+  bool _screenshotLoading = false;
+  String _screenshotLoadingMessage = '';
+  String? _screenshotError;
+  Recipe? _screenshotPreview;
 
   @override
   void dispose() {
@@ -41,92 +57,211 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
     super.dispose();
   }
 
-  // ── Fetch + parse ──────────────────────────────────────────────────────────
+  // ── Confirm: add to session and open recipe detail ─────────────────────────
 
-  Future<void> _parse() async {
+  void _confirm(Recipe recipe) {
+    addImportedRecipe(recipe);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => RecipeDetailScreen(recipe: recipe),
+      ),
+    );
+  }
+
+  // ── URL import pipeline ────────────────────────────────────────────────────
+
+  Future<void> _parseUrl() async {
     if (!_formKey.currentState!.validate()) return;
     final url = _urlController.text.trim();
-
     setState(() {
-      _loading = true;
-      _loadingMessage = 'Fetching recipe…';
-      _error = null;
-      _preview = null;
+      _urlLoading = true;
+      _urlLoadingMessage = 'Fetching recipe…';
+      _urlError = null;
+      _urlPreview = null;
     });
 
     try {
-      final html = await _fetchWithFallback(url);
-
+      final html = await _fetchHtml(url);
       final recipe = _parseSchemaOrgRecipe(html, url);
       if (recipe == null) {
         setState(() {
-          _error =
+          _urlError =
               'No recipe data found on that page. Make sure the URL points '
-              'directly to a recipe (e.g. allrecipes.com, foodnetwork.com).';
-          _loading = false;
+              'directly to a recipe (e.g. AllRecipes, Food Network, BBC Good Food).';
+          _urlLoading = false;
         });
         return;
       }
 
-      // Extract tools from steps using the VLM server.
       List<String> tools = [];
       if (recipe.steps.isNotEmpty) {
-        setState(() => _loadingMessage = 'Extracting tools…');
+        setState(() => _urlLoadingMessage = 'Extracting tools…');
         tools = await _extractTools(recipe.steps);
       }
 
-      // Rebuild the recipe with the extracted tools.
-      final recipeWithTools = Recipe(
-        id: recipe.id,
-        name: recipe.name,
-        category: recipe.category,
-        estimatedTimeMinutes: recipe.estimatedTimeMinutes,
-        difficulty: recipe.difficulty,
-        dietaryPreferences: recipe.dietaryPreferences,
-        allergens: recipe.allergens,
-        ingredients: recipe.ingredients,
-        tools: tools,
-        steps: recipe.steps,
-        servings: recipe.servings,
-        isImported: true,
-      );
-
       setState(() {
-        _preview = recipeWithTools;
-        _loading = false;
+        _urlPreview = Recipe(
+          id: recipe.id,
+          name: recipe.name,
+          category: recipe.category,
+          estimatedTimeMinutes: recipe.estimatedTimeMinutes,
+          difficulty: recipe.difficulty,
+          dietaryPreferences: recipe.dietaryPreferences,
+          allergens: recipe.allergens,
+          ingredients: recipe.ingredients,
+          tools: tools,
+          steps: recipe.steps,
+          servings: recipe.servings,
+          isImported: true,
+        );
+        _urlLoading = false;
       });
-    } catch (e) {
+    } catch (_) {
       setState(() {
-        _error = 'Could not load the page. Please check the URL and try again.';
-        _loading = false;
+        _urlError = 'Could not load the page. Please check the URL and try again.';
+        _urlLoading = false;
       });
     }
   }
 
-  /// Fetches the HTML of [url] via the app's own Flask backend,
-  /// which has no CORS restrictions.
-  Future<String> _fetchWithFallback(String url) async {
+  Future<String> _fetchHtml(String url) async {
     final uri = recipeFetchUri(url);
     final resp = await http.get(uri).timeout(const Duration(seconds: 25));
-    if (resp.statusCode != 200) {
-      throw Exception('Backend returned ${resp.statusCode}');
-    }
+    if (resp.statusCode != 200) throw Exception('Backend ${resp.statusCode}');
     final body = jsonDecode(resp.body) as Map<String, dynamic>;
-    if (body.containsKey('error')) {
-      throw Exception(body['error']);
-    }
+    if (body.containsKey('error')) throw Exception(body['error']);
     final html = body['html'] as String? ?? '';
-    if (html.isEmpty) throw Exception('Empty response from server');
+    if (html.isEmpty) throw Exception('Empty response');
     return html;
   }
 
-  /// Calls /extract-tools on the backend VLM to get a list of kitchen tools
-  /// inferred from the recipe's step text.  Falls back to rule-based extraction
-  /// if the server is unavailable or returns an empty list.
+  // ── Screenshot import pipeline ─────────────────────────────────────────────
+
+  Future<void> _pickScreenshots() async {
+    final picked = await _picker.pickMultiImage(imageQuality: 82);
+    if (picked.isEmpty) return;
+
+    // Pre-load bytes for thumbnail display.
+    final newCache = <int, Uint8List>{};
+    final startIndex = _selectedImages.length;
+    for (int i = 0; i < picked.length; i++) {
+      try {
+        newCache[startIndex + i] = await picked[i].readAsBytes();
+      } catch (_) {}
+    }
+
+    setState(() {
+      _selectedImages = [..._selectedImages, ...picked];
+      _thumbnailCache.addAll(newCache);
+      _screenshotError = null;
+      _screenshotPreview = null;
+    });
+  }
+
+  void _removeScreenshot(int index) {
+    setState(() {
+      _selectedImages = [
+        ..._selectedImages.sublist(0, index),
+        ..._selectedImages.sublist(index + 1),
+      ];
+      // Rebuild cache with corrected indices.
+      final rebuilt = <int, Uint8List>{};
+      for (int i = 0; i < _selectedImages.length; i++) {
+        final old = _thumbnailCache[i >= index ? i + 1 : i];
+        if (old != null) rebuilt[i] = old;
+      }
+      _thumbnailCache
+        ..clear()
+        ..addAll(rebuilt);
+      _screenshotPreview = null;
+      _screenshotError = null;
+    });
+  }
+
+  Future<void> _importFromScreenshots() async {
+    if (_selectedImages.isEmpty) return;
+
+    // Collect bytes — use cache when possible; re-read otherwise.
+    final imageBytes = <Uint8List>[];
+    final mimeTypes = <String>[];
+    for (int i = 0; i < _selectedImages.length; i++) {
+      final cached = _thumbnailCache[i];
+      imageBytes.add(cached ?? await _selectedImages[i].readAsBytes());
+      mimeTypes.add(_mimeTypeFromPath(_selectedImages[i].path));
+    }
+
+    final n = _selectedImages.length;
+    setState(() {
+      _screenshotLoading = true;
+      _screenshotLoadingMessage =
+          'Reading $n screenshot${n == 1 ? '' : 's'}…';
+      _screenshotError = null;
+      _screenshotPreview = null;
+    });
+
+    try {
+      if (kGeminiApiKey.isEmpty) {
+        setState(() {
+          _screenshotError =
+              'Recipe screenshot import requires a Gemini API key. '
+              'Ask the app admin to set GEMINI_API_KEY at build time.';
+          _screenshotLoading = false;
+        });
+        return;
+      }
+
+      setState(() => _screenshotLoadingMessage = 'Extracting recipe…');
+      final recipe = await extractRecipeFromScreenshots(
+        imageBytes,
+        mimeTypes: mimeTypes,
+      );
+
+      if (recipe == null) {
+        setState(() {
+          _screenshotError =
+              'Could not extract a recipe from the selected screenshots. '
+              'Try selecting clearer images or add more screenshots.';
+          _screenshotLoading = false;
+        });
+        return;
+      }
+
+      List<String> tools = recipe.tools;
+      if (tools.isEmpty && recipe.steps.isNotEmpty) {
+        setState(() => _screenshotLoadingMessage = 'Extracting tools…');
+        tools = await _extractTools(recipe.steps);
+      }
+
+      setState(() {
+        _screenshotPreview = Recipe(
+          id: recipe.id,
+          name: recipe.name,
+          category: recipe.category,
+          estimatedTimeMinutes: recipe.estimatedTimeMinutes,
+          difficulty: recipe.difficulty,
+          dietaryPreferences: recipe.dietaryPreferences,
+          allergens: recipe.allergens,
+          ingredients: recipe.ingredients,
+          tools: tools,
+          steps: recipe.steps,
+          isImported: true,
+        );
+        _screenshotLoading = false;
+      });
+    } catch (_) {
+      setState(() {
+        _screenshotError =
+            'Something went wrong while reading the screenshots. Please try again.';
+        _screenshotLoading = false;
+      });
+    }
+  }
+
+  // ── Shared helpers ─────────────────────────────────────────────────────────
+
+  /// Calls /extract-tools; falls back to rule-based extraction.
   Future<List<String>> _extractTools(List<String> steps) async {
     final stepsText = steps.join('\n');
-
-    // Try VLM server first.
     try {
       final uri = toolsExtractUri();
       final resp = await http
@@ -148,18 +283,22 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
           if (vlmTools.isNotEmpty) return vlmTools;
         }
       }
-    } catch (_) {
-      // VLM unavailable — fall through to rule-based.
-    }
-
-    // Rule-based fallback: scan steps text for known kitchen tool keywords.
+    } catch (_) {}
     return _inferToolsFromText(stepsText);
   }
 
-  void _confirm() {
-    if (_preview == null) return;
-    addImportedRecipe(_preview!);
-    Navigator.of(context).pop();
+  static String _mimeTypeFromPath(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      default:
+        return 'image/jpeg';
+    }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -170,7 +309,7 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
     final padding = groceryPagePadding(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Import Recipe from Link')),
+      appBar: AppBar(title: const Text('Import Recipe')),
       body: GroceryAmbientBackdrop(
         child: SafeArea(
           child: Center(
@@ -182,33 +321,26 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                 padding: padding.add(
                   const EdgeInsets.only(top: 28, bottom: 48),
                 ),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // ── Instructions ──────────────────────────────────
-                      Text(
-                        'Paste a recipe URL below.',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Works best with popular recipe sites that include '
-                        'structured data (AllRecipes, Food Network, BBC Good '
-                        'Food, Serious Eats, etc.).',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.white70,
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      // ── URL field ──────────────────────────────────────
-                      TextFormField(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── URL import section ─────────────────────────────────
+                    _SectionHeading(
+                      icon: Icons.link_rounded,
+                      title: 'Import from URL',
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Works best with popular recipe sites that include '
+                      'structured data (AllRecipes, Food Network, BBC Good '
+                      'Food, Serious Eats, etc.).',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 20),
+                    Form(
+                      key: _formKey,
+                      child: TextFormField(
                         controller: _urlController,
                         keyboardType: TextInputType.url,
                         autocorrect: false,
@@ -217,7 +349,8 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                           labelText: 'Recipe URL',
                           labelStyle:
                               const TextStyle(color: Colors.white60),
-                          hintText: 'https://www.allrecipes.com/recipe/...',
+                          hintText:
+                              'https://www.allrecipes.com/recipe/...',
                           hintStyle:
                               const TextStyle(color: Colors.white30),
                           filled: true,
@@ -233,12 +366,10 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                               width: 2,
                             ),
                           ),
-                          errorStyle:
-                              const TextStyle(color: Color(0xFFFF8A80)),
+                          errorStyle: const TextStyle(
+                              color: Color(0xFFFF8A80)),
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 16,
-                          ),
+                              horizontal: 16, vertical: 16),
                         ),
                         validator: (v) {
                           final s = v?.trim() ?? '';
@@ -249,104 +380,373 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
                           return null;
                         },
                       ),
-
-                      const SizedBox(height: 20),
-
-                      // ── Parse button ───────────────────────────────────
-                        SizedBox(
-                          width: double.infinity,
-                          child: GroceryGlowButton(
-                            onPressed: _loading ? null : _parse,
-                            child: const Text('Parse Recipe'),
-                          ),
-                        ),
-
-                      // ── Loading ────────────────────────────────────────
-                      if (_loading) ...[
-                        const SizedBox(height: 28),
-                        Center(
-                          child: Column(
-                            children: [
-                              const CircularProgressIndicator(
-                                color: kBrandPurpleLight,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                _loadingMessage,
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-
-                      // ── Error ──────────────────────────────────────────
-                      if (_error != null) ...[
-                        const SizedBox(height: 20),
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF4A1A1A),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.error_outline_rounded,
-                                color: Color(0xFFFF8A80),
-                                size: 22,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  _error!,
-                                  style: const TextStyle(
-                                    color: Color(0xFFFF8A80),
-                                    fontSize: 14,
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-
-                      // ── Preview ────────────────────────────────────────
-                      if (_preview != null) ...[
-                        const SizedBox(height: 32),
-                        _PreviewCard(recipe: _preview!),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          child: GroceryGlowButton(
-                            onPressed: _confirm,
-                            child: const Text('Add to My Recipes'),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: TextButton(
-                            onPressed: () =>
-                                setState(() => _preview = null),
-                            child: const Text(
-                              'Try a different URL',
-                              style: TextStyle(color: Colors.white60),
-                            ),
-                          ),
-                        ),
-                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: GroceryGlowButton(
+                        onPressed: _urlLoading ? null : _parseUrl,
+                        child: const Text('Import from URL'),
+                      ),
+                    ),
+                    if (_urlLoading) ...[
+                      const SizedBox(height: 28),
+                      _LoadingIndicator(message: _urlLoadingMessage),
                     ],
-                  ),
+                    if (_urlError != null) ...[
+                      const SizedBox(height: 20),
+                      _ErrorBox(message: _urlError!),
+                    ],
+                    if (_urlPreview != null) ...[
+                      const SizedBox(height: 32),
+                      _PreviewCard(recipe: _urlPreview!),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: GroceryGlowButton(
+                          onPressed: () => _confirm(_urlPreview!),
+                          child: const Text('Add to My Recipes'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed: () =>
+                              setState(() => _urlPreview = null),
+                          child: const Text(
+                            'Try a different URL',
+                            style: TextStyle(color: Colors.white60),
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    // ── Divider ─────────────────────────────────────────────
+                    const SizedBox(height: 36),
+                    const _OrDivider(),
+                    const SizedBox(height: 36),
+
+                    // ── Screenshot import section ──────────────────────────
+                    _SectionHeading(
+                      icon: Icons.photo_library_outlined,
+                      title: 'Import from Screenshots',
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Select one or more screenshots from the same recipe. '
+                      'A single recipe can span several images — all selected '
+                      'screenshots are combined into one recipe.',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: _OutlineButton(
+                        onPressed: _screenshotLoading
+                            ? null
+                            : _pickScreenshots,
+                        icon: Icons.add_photo_alternate_outlined,
+                        label: _selectedImages.isEmpty
+                            ? 'Select Recipe Screenshots'
+                            : 'Add More Screenshots',
+                      ),
+                    ),
+
+                    // Thumbnail strip + count
+                    if (_selectedImages.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Semantics(
+                        label:
+                            '${_selectedImages.length} screenshot${_selectedImages.length == 1 ? '' : 's'} selected.',
+                        child: Text(
+                          '${_selectedImages.length} screenshot${_selectedImages.length == 1 ? '' : 's'} selected',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: kBrandPurpleLight,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (int i = 0;
+                                i < _selectedImages.length;
+                                i++) ...[
+                              if (i > 0) const SizedBox(width: 10),
+                              _ThumbnailChip(
+                                bytes: _thumbnailCache[i],
+                                index: i,
+                                onRemove: _screenshotLoading
+                                    ? null
+                                    : () => _removeScreenshot(i),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: GroceryGlowButton(
+                          onPressed:
+                              _screenshotLoading ? null : _importFromScreenshots,
+                          child: const Text('Import Recipe'),
+                        ),
+                      ),
+                    ],
+
+                    if (_screenshotLoading) ...[
+                      const SizedBox(height: 28),
+                      _LoadingIndicator(message: _screenshotLoadingMessage),
+                    ],
+                    if (_screenshotError != null) ...[
+                      const SizedBox(height: 20),
+                      _ErrorBox(message: _screenshotError!),
+                    ],
+                    if (_screenshotPreview != null) ...[
+                      const SizedBox(height: 32),
+                      _PreviewCard(recipe: _screenshotPreview!),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        child: GroceryGlowButton(
+                          onPressed: () => _confirm(_screenshotPreview!),
+                          child: const Text('Add to My Recipes'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed: () => setState(() {
+                            _screenshotPreview = null;
+                            _selectedImages = [];
+                            _thumbnailCache.clear();
+                          }),
+                          child: const Text(
+                            'Try different screenshots',
+                            style: TextStyle(color: Colors.white60),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Shared UI components ─────────────────────────────────────────────────────
+
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading({required this.icon, required this.title});
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: kBrandPurpleLight, size: 22),
+        const SizedBox(width: 10),
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 20,
+              ),
+        ),
+      ],
+    );
+  }
+}
+
+class _OrDivider extends StatelessWidget {
+  const _OrDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(child: Divider(color: Colors.white12, thickness: 1)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'OR',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.white38,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                ),
+          ),
+        ),
+        const Expanded(child: Divider(color: Colors.white12, thickness: 1)),
+      ],
+    );
+  }
+}
+
+class _LoadingIndicator extends StatelessWidget {
+  const _LoadingIndicator({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        children: [
+          const CircularProgressIndicator(color: kBrandPurpleLight),
+          const SizedBox(height: 12),
+          Text(
+            message,
+            style: const TextStyle(color: Colors.white70, fontSize: 15),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBox extends StatelessWidget {
+  const _ErrorBox({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF4A1A1A),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline_rounded,
+              color: Color(0xFFFF8A80), size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                  color: Color(0xFFFF8A80), fontSize: 15, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Outline (non-filled) button — used for "Select screenshots" to visually
+/// distinguish it from the primary import action.
+class _OutlineButton extends StatelessWidget {
+  const _OutlineButton({
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+  });
+  final VoidCallback? onPressed;
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 20),
+      label: Text(label, style: const TextStyle(fontSize: 16)),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: kBrandPurpleLight,
+        side: BorderSide(
+          color: onPressed == null
+              ? Colors.white24
+              : kBrandPurpleLight.withValues(alpha: 0.7),
+          width: 2,
+        ),
+        padding:
+            const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+    );
+  }
+}
+
+/// A screenshot thumbnail with an "×" remove button overlaid in the corner.
+class _ThumbnailChip extends StatelessWidget {
+  const _ThumbnailChip({
+    required this.bytes,
+    required this.index,
+    required this.onRemove,
+  });
+  final Uint8List? bytes;
+  final int index;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Screenshot ${index + 1}',
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 90,
+            height: 120,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: const Color(0xFF1E2130),
+              border: Border.all(
+                color: kBrandPurpleLight.withValues(alpha: 0.4),
+                width: 1.5,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: bytes != null
+                ? Image.memory(bytes!, fit: BoxFit.cover)
+                : const Center(
+                    child: Icon(Icons.image_outlined,
+                        color: Colors.white38, size: 32),
+                  ),
+          ),
+          // Remove button
+          Positioned(
+            top: -8,
+            right: -8,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Semantics(
+                button: true,
+                label: 'Remove screenshot ${index + 1}',
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFCC3333),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: const Color(0xFF0E0F1A), width: 2),
+                  ),
+                  child: const Icon(Icons.close,
+                      color: Colors.white, size: 12),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -364,16 +764,10 @@ class _PreviewCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF252344).withValues(alpha: 0.97),
-            const Color(0xFF1A1D2E),
-          ],
-        ),
+        color: const Color(0xFF1E2130),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: kBrandPurpleLight.withValues(alpha: 0.4)),
+        border:
+            Border.all(color: kBrandPurpleLight.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -402,25 +796,43 @@ class _PreviewCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Row(
+          Wrap(
+            spacing: 16,
+            runSpacing: 6,
             children: [
-              Icon(Icons.access_time_rounded,
-                  size: 16, color: kBrandPurpleLight),
-              const SizedBox(width: 5),
-              Text(
-                recipe.estimatedTimeMinutes > 0
-                    ? '~${recipe.estimatedTimeMinutes} min'
-                    : 'Time unknown',
-                style: TextStyle(color: kBrandPurpleLight, fontSize: 14),
-              ),
-              const SizedBox(width: 16),
-              Icon(Icons.restaurant_menu_rounded,
-                  size: 16, color: Colors.white54),
-              const SizedBox(width: 5),
-              Text(
-                '${recipe.ingredients.length} ingredients',
-                style: const TextStyle(color: Colors.white54, fontSize: 14),
-              ),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.access_time_rounded,
+                    size: 16, color: kBrandPurpleLight),
+                const SizedBox(width: 5),
+                Text(
+                  recipe.estimatedTimeMinutes > 0
+                      ? '~${recipe.estimatedTimeMinutes} min'
+                      : 'Time unknown',
+                  style:
+                      TextStyle(color: kBrandPurpleLight, fontSize: 14),
+                ),
+              ]),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.restaurant_menu_rounded,
+                    size: 16, color: Colors.white54),
+                const SizedBox(width: 5),
+                Text(
+                  '${recipe.ingredients.length} ingredient${recipe.ingredients.length == 1 ? '' : 's'}',
+                  style: const TextStyle(
+                      color: Colors.white54, fontSize: 14),
+                ),
+              ]),
+              if (recipe.steps.isNotEmpty)
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.format_list_numbered_rounded,
+                      size: 16, color: Colors.white54),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${recipe.steps.length} steps',
+                    style: const TextStyle(
+                        color: Colors.white54, fontSize: 14),
+                  ),
+                ]),
             ],
           ),
           if (recipe.ingredients.isNotEmpty) ...[
@@ -437,7 +849,7 @@ class _PreviewCard extends StatelessWidget {
                   (i) => Padding(
                     padding: const EdgeInsets.only(bottom: 3),
                     child: Text(
-                      '• ${i.name}${i.quantity.isNotEmpty ? " — ${i.quantity}" : ""}',
+                      '• ${i.name}${i.quantity.isNotEmpty ? ' — ${i.quantity}' : ''}',
                       style: const TextStyle(
                           color: Colors.white60, fontSize: 13),
                     ),
@@ -446,9 +858,34 @@ class _PreviewCard extends StatelessWidget {
             if (recipe.ingredients.length > 5)
               Text(
                 '  + ${recipe.ingredients.length - 5} more',
-                style:
-                    const TextStyle(color: Colors.white38, fontSize: 13),
+                style: const TextStyle(
+                    color: Colors.white38, fontSize: 13),
               ),
+          ],
+          if (recipe.allergens.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 15, color: Color(0xFFFFAA44)),
+                for (final a in recipe.allergens)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4A2800),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      a,
+                      style: const TextStyle(
+                          color: Color(0xFFFFAA44), fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
           ],
           const SizedBox(height: 10),
           Container(
@@ -469,12 +906,9 @@ class _PreviewCard extends StatelessWidget {
   }
 }
 
-// ─── schema.org / JSON-LD parser ──────────────────────────────────────────────
+// ─── schema.org / JSON-LD parser (URL import only) ────────────────────────────
 
-/// Finds and parses the first schema.org Recipe object from [html].
-/// Returns null if no recipe data can be found.
 Recipe? _parseSchemaOrgRecipe(String html, String sourceUrl) {
-  // Find all <script type="application/ld+json"> blocks.
   final scriptRe = RegExp(
     '<script[^>]+type=["\']application/ld\\+json["\'][^>]*>(.*?)</script>',
     dotAll: true,
@@ -484,7 +918,6 @@ Recipe? _parseSchemaOrgRecipe(String html, String sourceUrl) {
   for (final match in scriptRe.allMatches(html)) {
     final raw = match.group(1)?.trim() ?? '';
     if (raw.isEmpty) continue;
-
     dynamic parsed;
     try {
       parsed = jsonDecode(raw);
@@ -492,7 +925,6 @@ Recipe? _parseSchemaOrgRecipe(String html, String sourceUrl) {
       continue;
     }
 
-    // Could be a single object or a list; unwrap @graph arrays too.
     final candidates = <dynamic>[];
     if (parsed is List) {
       candidates.addAll(parsed);
@@ -511,7 +943,6 @@ Recipe? _parseSchemaOrgRecipe(String html, String sourceUrl) {
       final isRecipe = (type is String && type == 'Recipe') ||
           (type is List && type.contains('Recipe'));
       if (!isRecipe) continue;
-
       return _buildRecipeFromSchema(obj, sourceUrl);
     }
   }
@@ -519,34 +950,32 @@ Recipe? _parseSchemaOrgRecipe(String html, String sourceUrl) {
 }
 
 Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
-  // ── Name ──────────────────────────────────────────────────────────────
   final name = _decodeHtmlEntities(
       _str(s['name']) ?? _str(s['headline']) ?? 'Imported Recipe');
 
-  // ── Time ──────────────────────────────────────────────────────────────
   int minutes = _parseDuration(s['totalTime']);
   if (minutes == 0) {
-    minutes = _parseDuration(s['cookTime']) + _parseDuration(s['prepTime']);
+    minutes =
+        _parseDuration(s['cookTime']) + _parseDuration(s['prepTime']);
   }
 
-  // ── Servings ──────────────────────────────────────────────────────────
   final servings = _parseServings(s['recipeYield']);
 
-  // ── Ingredients ───────────────────────────────────────────────────────
   final rawIngredients = s['recipeIngredient'];
   final ingredients = <RecipeIngredient>[];
   if (rawIngredients is List) {
     for (final item in rawIngredients) {
-      final text = _decodeHtmlEntities(_str(item)?.trim() ?? '');
+      final text =
+          _decodeHtmlEntities(_str(item)?.trim() ?? '');
       if (text.isEmpty) continue;
       final parts = _splitQuantityName(text);
       final cleanedName = _cleanIngredientName(parts.$2);
       if (cleanedName.isEmpty) continue;
-      ingredients.add(RecipeIngredient(cleanedName, quantity: parts.$1));
+      ingredients
+          .add(RecipeIngredient(cleanedName, quantity: parts.$1));
     }
   }
 
-  // ── Steps ─────────────────────────────────────────────────────────────
   final rawSteps = s['recipeInstructions'];
   final steps = <String>[];
   if (rawSteps is List) {
@@ -566,13 +995,8 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
         .where((l) => l.isNotEmpty));
   }
 
-  // ── Category ──────────────────────────────────────────────────────────
   final category = _detectCategory(s, name);
-
-  // ── Dietary / allergen hints ───────────────────────────────────────────
   final dietaryPrefs = _parseDietaryPrefs(s);
-
-  // ── Build id from timestamp ───────────────────────────────────────────
   final id = 'imported_${DateTime.now().millisecondsSinceEpoch}';
 
   return Recipe(
@@ -600,7 +1024,6 @@ String? _str(dynamic v) {
   return null;
 }
 
-/// Parse ISO 8601 duration PT1H30M → minutes.
 int _parseDuration(dynamic v) {
   final s = _str(v) ?? '';
   if (s.isEmpty) return 0;
@@ -612,7 +1035,6 @@ int _parseDuration(dynamic v) {
   return h * 60 + min;
 }
 
-/// Decodes common HTML entities: &#39; → ', &amp; → &, etc.
 String _decodeHtmlEntities(String s) {
   return s
       .replaceAll('&amp;', '&')
@@ -629,14 +1051,9 @@ String _decodeHtmlEntities(String s) {
       });
 }
 
-/// Very light quantity/name splitter: "2 cups all-purpose flour" →
-/// ("2 cups", "all-purpose flour").  Falls back to ("", full text).
 (String, String) _splitQuantityName(String text) {
-  // Decode HTML entities first.
   final t = _decodeHtmlEntities(text);
-  // Number pattern: digits, decimals, fractions, vulgar fractions.
   const num = r'[\d\.\/\s¼½¾⅓⅔⅛⅜⅝⅞]+';
-  // Units (singular + plural).
   const units =
       r'cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|'
       r'oz|ounce|ounces|pound|pounds|lb|lbs|gram|grams|g|kg|ml|'
@@ -645,67 +1062,56 @@ String _decodeHtmlEntities(String s) {
       r'bag|bags|box|boxes|stick|sticks|bar|bars|'
       r'sprig|sprigs|sheet|sheets|strip|strips|'
       r'to taste|as needed|pinch';
-  final re = RegExp(
-    '^($num(?:$units)\\b)\\s*(.*)',
-    caseSensitive: false,
-  );
+  final re = RegExp('^($num(?:$units)\\b)\\s*(.*)', caseSensitive: false);
   final m = re.firstMatch(t);
-  if (m != null) {
-    return (m.group(1)!.trim(), m.group(2)!.trim());
-  }
-  // Fallback: leading number only (e.g. "2 eggs").
+  if (m != null) return (m.group(1)!.trim(), m.group(2)!.trim());
   final numRe = RegExp(r'^([\d\.\/\s¼½¾⅓⅔⅛⅜⅝⅞]+)\s+(.+)');
   final nm = numRe.firstMatch(t);
-  if (nm != null) {
-    return (nm.group(1)!.trim(), nm.group(2)!.trim());
-  }
+  if (nm != null) return (nm.group(1)!.trim(), nm.group(2)!.trim());
   return ('', t);
 }
 
-/// Rule-based kitchen tool extraction — scans recipe steps for tool keywords.
-/// Used as a fallback when the VLM server is unavailable.
 List<String> _inferToolsFromText(String stepsText) {
   if (stepsText.isEmpty) return [];
   final s = stepsText.toLowerCase();
-
   final found = <String>[];
-  void check(Pattern pattern, String toolName) {
-    if (pattern is RegExp ? pattern.hasMatch(s) : s.contains(pattern as String)) {
-      found.add(toolName);
+  void check(Pattern p, String name) {
+    if (p is RegExp ? p.hasMatch(s) : s.contains(p as String)) {
+      found.add(name);
     }
   }
 
   check(RegExp(r'\boven\b|preheat'), 'Oven');
   check(RegExp(r'baking sheet|sheet pan|cookie sheet'), 'Baking sheet');
-  check(RegExp(r'baking dish|baking pan|casserole dish|9x13|9-by-13|13.by.9'), 'Baking dish');
-  check(RegExp(r'\bskillet\b|frying pan|sauté pan|saute pan'), 'Skillet or frying pan');
+  check(RegExp(r'baking dish|casserole dish|9x13'), 'Baking dish');
+  check(RegExp(r'\bskillet\b|frying pan|sauté pan|saute pan'),
+      'Skillet or frying pan');
   check(RegExp(r'\bsaucepan\b|small pot|medium pot'), 'Saucepan');
   check(RegExp(r'large pot|stock pot|dutch oven'), 'Large pot');
-  check(RegExp(r'mixing bowl|large bowl|medium bowl|small bowl'), 'Mixing bowl');
+  check(RegExp(r'mixing bowl|large bowl|medium bowl|small bowl'),
+      'Mixing bowl');
   check(RegExp(r'\bblender\b'), 'Blender');
   check(RegExp(r'food processor'), 'Food processor');
-  check(RegExp(r'\bknife\b|cutting board|chopping board'), 'Knife and cutting board');
+  check(RegExp(r'\bknife\b|cutting board|chopping board'),
+      'Knife and cutting board');
   check(RegExp(r'\bspatula\b'), 'Spatula');
   check(RegExp(r'\bwhisk\b'), 'Whisk');
-  check(RegExp(r'wooden spoon|mixing spoon|stirring spoon'), 'Wooden spoon');
+  check(RegExp(r'wooden spoon|mixing spoon'), 'Wooden spoon');
   check(RegExp(r'measuring cup'), 'Measuring cups');
-  check(RegExp(r'measuring spoon|tablespoon measure|teaspoon measure'), 'Measuring spoons');
+  check(RegExp(r'measuring spoon'), 'Measuring spoons');
   check(RegExp(r'\bcolander\b|\bstrainer\b'), 'Colander');
   check(RegExp(r'\bgrater\b'), 'Grater');
   check(RegExp(r'rolling pin'), 'Rolling pin');
-  check(RegExp(r'meat mallet|tenderizer|pound.*flat|flatten.*pound'), 'Meat mallet');
+  check(RegExp(r'meat mallet|tenderizer'), 'Meat mallet');
   check(RegExp(r'plastic wrap|cling wrap'), 'Plastic wrap');
   check(RegExp(r'aluminum foil|tin foil'), 'Aluminum foil');
-  check(RegExp(r'\btoothpick'), 'Toothpicks');
   check(RegExp(r'electric mixer|hand mixer|stand mixer'), 'Electric mixer');
   check(RegExp(r'oven mitt|oven glove'), 'Oven mitts');
-  check(RegExp(r'shallow dish|shallow bowl|shallow pan'), 'Shallow dish');
   check(RegExp(r'\btongs\b'), 'Tongs');
   check(RegExp(r'\bpeeler\b'), 'Vegetable peeler');
   check(RegExp(r'can opener'), 'Can opener');
   check(RegExp(r'parchment paper|wax paper'), 'Parchment paper');
   check(RegExp(r'wire rack|cooling rack'), 'Wire rack');
-
   return found;
 }
 
@@ -716,22 +1122,23 @@ String _detectCategory(Map<dynamic, dynamic> s, String name) {
     name,
   ].join(' ').toLowerCase();
 
-  if (RegExp(r'\b(breakfast|brunch|morning|pancake|waffle|omelette|omelet|cereal|granola|muffin|bagel)\b').hasMatch(hints)) {
-    return 'Breakfast';
-  }
-  if (RegExp(r'\b(dessert|cake|cookie|pie|brownie|pudding|ice.?cream|pastry|sweet|tart|cupcake|candy|chocolate)\b').hasMatch(hints)) {
-    return 'Desserts';
-  }
-  if (RegExp(r'\b(dinner|lunch|main|entree|entrée|soup|sandwich|burger|pasta|salad|chicken|beef|pork|fish|rice|noodle|pizza|stir.?fry|roast|grill|bake)\b').hasMatch(hints)) {
-    return 'Entrées';
-  }
+  if (RegExp(
+          r'\b(breakfast|brunch|morning|pancake|waffle|omelette|omelet|cereal|granola|muffin|bagel)\b')
+      .hasMatch(hints)) return 'Breakfast';
+  if (RegExp(
+          r'\b(dessert|cake|cookie|pie|brownie|pudding|ice.?cream|pastry|sweet|tart|cupcake|candy|chocolate)\b')
+      .hasMatch(hints)) return 'Desserts';
+  if (RegExp(
+          r'\b(dinner|lunch|main|entree|soup|sandwich|burger|pasta|salad|chicken|beef|pork|fish|rice|noodle|pizza|stir.?fry|roast|grill|bake)\b')
+      .hasMatch(hints)) return 'Entrées';
   return kImportedCategory;
 }
 
 List<String> _parseDietaryPrefs(Map<dynamic, dynamic> s) {
   final raw = s['suitableForDiet'];
   final tags = <String>[];
-  final list = raw is List ? raw : (raw is String ? [raw] : <dynamic>[]);
+  final list =
+      raw is List ? raw : (raw is String ? [raw] : <dynamic>[]);
   for (final item in list) {
     final v = (_str(item) ?? '').toLowerCase();
     if (v.contains('vegetarian')) tags.add('Vegetarian');
@@ -746,23 +1153,13 @@ List<String> _parseDietaryPrefs(Map<dynamic, dynamic> s) {
   return tags;
 }
 
-/// Removes parenthetical text and everything after the first comma from an
-/// ingredient name.
-/// Examples:
-///   "kosher salt, plus more to taste"      → "kosher salt"
-///   "breadcrumbs (or panko)"               → "breadcrumbs"
-///   "ham or prosciutto"                    → "ham or prosciutto"
 String _cleanIngredientName(String raw) {
-  // Remove anything inside parentheses (including the parens).
   var s = raw.replaceAll(RegExp(r'\(.*?\)'), '');
-  // Remove everything after the first comma.
   final commaIdx = s.indexOf(',');
   if (commaIdx >= 0) s = s.substring(0, commaIdx);
   return s.trim();
 }
 
-/// Parses recipeYield into an integer serving count.
-/// Handles: "6", "6 servings", "Serves 6", ["6 servings"].
 int? _parseServings(dynamic raw) {
   final s = _str(raw) ?? '';
   if (s.isEmpty) return null;
