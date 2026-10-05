@@ -190,11 +190,9 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
       mimeTypes.add(_mimeTypeFromPath(_selectedImages[i].path));
     }
 
-    final n = _selectedImages.length;
     setState(() {
       _screenshotLoading = true;
-      _screenshotLoadingMessage =
-          'Reading $n screenshot${n == 1 ? '' : 's'}…';
+      _screenshotLoadingMessage = 'Starting…';
       _screenshotError = null;
       _screenshotPreview = null;
     });
@@ -210,10 +208,12 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
         return;
       }
 
-      setState(() => _screenshotLoadingMessage = 'Extracting recipe…');
       final recipe = await extractRecipeFromScreenshots(
         imageBytes,
         mimeTypes: mimeTypes,
+        onProgress: (msg) {
+          if (mounted) setState(() => _screenshotLoadingMessage = msg);
+        },
       );
 
       if (recipe == null) {

@@ -8,6 +8,8 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'ocr_config.dart';
+
 import 'imported_recipes_state.dart' show kImportedCategory;
 import 'recipe_data.dart';
 
@@ -380,35 +382,63 @@ String _asString(dynamic value) {
 }
 
 // ── Screenshot → Recipe extraction ───────────────────────────────────────────
+//
+// Pipeline (fast, reliable):
+//   1. OCR every image via the Magic server /extract-text  (~5 s each)
+//   2. Combine the extracted text
+//   3. Send text-only to Gemini for structured recipe parsing  (~5–10 s)
+//
+// This avoids sending large base64-encoded images to Gemini Vision,
+// which could hang for 20+ minutes cycling through model retries.
+// The Magic server does NOT need any changes — /extract-text already exists.
 
-/// Sends one or more recipe screenshot images to Gemini Vision and returns
-/// a fully populated [Recipe], or null if extraction fails.
+/// OCRs [imageBytesList] via the Flask `/extract-text` endpoint and returns
+/// the combined text from all images (each separated by a blank line).
 ///
-/// [mimeTypes] should be a parallel list of MIME types for each image bytes
-/// entry (e.g. 'image/jpeg', 'image/png'). Defaults to 'image/jpeg'.
-Future<Recipe?> extractRecipeFromScreenshots(
-  List<Uint8List> imageBytesList, {
-  List<String>? mimeTypes,
-}) async {
-  if (kGeminiApiKey.isEmpty) {
-    debugPrint(
-      '[Gemini-screenshot] GEMINI_API_KEY missing — '
-      'pass it with --dart-define=GEMINI_API_KEY=your_key',
-    );
-    return null;
+/// Individual image failures are silently skipped so partial results are
+/// still usable when one screenshot is blurry or unsupported.
+Future<String> _ocrImages(List<Uint8List> imageBytesList) async {
+  final parts = <String>[];
+  for (int i = 0; i < imageBytesList.length; i++) {
+    try {
+      final req = http.MultipartRequest('POST', ocrMultipartUri())
+        ..files.add(http.MultipartFile.fromBytes(
+          'image',
+          imageBytesList[i],
+          filename: 'screenshot_$i.jpg',
+        ));
+      final streamed =
+          await req.send().timeout(const Duration(seconds: 20));
+      final body = await streamed.stream.bytesToString();
+      if (streamed.statusCode == 200) {
+        final map = jsonDecode(body) as Map<String, dynamic>;
+        final text = (map['text'] as String? ?? '').trim();
+        if (text.isNotEmpty) parts.add(text);
+      }
+    } catch (e) {
+      debugPrint('[screenshot-ocr] image $i failed: $e');
+    }
   }
-  if (imageBytesList.isEmpty) return null;
+  return parts.join('\n\n');
+}
 
-  const prompt =
-      'You are a recipe extraction assistant for a low-vision cooking app. '
-      'The user has provided one or more screenshots of a recipe — a single recipe '
-      'may span several images. Combine all visible information into ONE recipe.\n\n'
+/// Sends [rawText] (already extracted from screenshots) to Gemini and returns
+/// a structured [Recipe], or null on failure.
+///
+/// Uses text-only Gemini — same path as "Surprise Me!" so it is proven to work.
+Future<Recipe?> _extractRecipeFromOcrText(String rawText) async {
+  if (rawText.trim().isEmpty) return null;
+
+  final prompt =
+      'You are a recipe extraction assistant for a low-vision cooking app.\n'
+      'The following text was extracted from one or more recipe screenshots.\n'
+      'A single recipe may be split across multiple images — merge all '
+      'content into ONE recipe, removing obvious duplicates.\n\n'
+      'EXTRACTED TEXT:\n$rawText\n\n'
       'Rules:\n'
-      '- Merge content across all screenshots; remove obvious duplicates from overlap.\n'
-      '- Preserve exact quantities and measurements shown in the images.\n'
-      '- Do NOT invent information not visible in the images.\n'
-      '- Return ONLY a valid JSON object — no markdown fences, no explanation.\n\n'
-      'Required JSON format:\n'
+      '- Preserve exact quantities and measurements shown in the text.\n'
+      '- Do NOT invent information not in the text.\n'
+      '- Return ONLY a valid JSON object — no markdown, no explanation.\n\n'
       '{\n'
       '  "name": "Recipe Name",\n'
       '  "estimatedTimeMinutes": 30,\n'
@@ -419,105 +449,119 @@ Future<Recipe?> extractRecipeFromScreenshots(
       '    {"name": "flour", "quantity": "2 cups"}\n'
       '  ],\n'
       '  "steps": [\n'
-      '    "Preheat oven to 350°F.",\n'
-      '    "Mix flour and butter in a bowl."\n'
+      '    "Preheat oven to 350\u00b0F.",\n'
+      '    "Mix flour and butter."\n'
       '  ]\n'
       '}\n\n'
       'Field rules:\n'
-      '- name: recipe title string.\n'
-      '- estimatedTimeMinutes: total time in minutes (integer, default 30).\n'
-      '- difficulty: 1–5 integer (1=easy, 5=very hard, default 2).\n'
+      '- name: recipe title (string).\n'
+      '- estimatedTimeMinutes: integer, default 30 if not found.\n'
+      '- difficulty: 1–5 integer (1=easy, 5=very hard), default 2.\n'
       '- dietaryPreferences: e.g. ["Vegetarian","Gluten-Free"] or [].\n'
       '- allergens: e.g. ["Dairy","Eggs","Wheat / Gluten","Nuts","Soy"] or [].\n'
-      '- ingredients: [{name, quantity}] — quantity is "" when not shown.\n'
-      '- steps: array of instruction strings, or [] if no steps are visible.';
+      '- ingredients: [{name, quantity}] — quantity "" when not shown.\n'
+      '- steps: array of instruction strings, [] if not visible.';
 
-  // Build multimodal parts: prompt text + one inlineData block per image.
-  final parts = <Map<String, dynamic>>[
-    {'text': prompt},
-  ];
-  for (int i = 0; i < imageBytesList.length; i++) {
-    final mime = (mimeTypes != null && i < mimeTypes.length)
-        ? mimeTypes[i]
-        : 'image/jpeg';
-    parts.add({
-      'inlineData': {
-        'mimeType': mime,
-        'data': base64Encode(imageBytesList[i]),
+  final requestBody = jsonEncode({
+    'contents': [
+      {
+        'parts': [
+          {'text': prompt},
+        ],
       },
-    });
-  }
-
-  String _buildBody({bool withJsonMime = true}) {
-    final genConfig = <String, dynamic>{
+    ],
+    'generationConfig': {
       'temperature': 0.2,
       'maxOutputTokens': 4096,
-    };
-    if (withJsonMime) genConfig['responseMimeType'] = 'application/json';
-    return jsonEncode({
-      'contents': [
-        {'parts': parts},
-      ],
-      'generationConfig': genConfig,
-    });
+      'responseMimeType': 'application/json',
+    },
+  });
+
+  // Try every model once with a short 30-second timeout — text requests are
+  // fast, so a single pass is sufficient.
+  for (final model in _kGeminiModels) {
+    final uri = Uri.parse(
+        '$_kGeminiBase$model:generateContent?key=$kGeminiApiKey');
+    try {
+      debugPrint('[screenshot-gemini] Trying $model…');
+      final resp = await http
+          .post(uri,
+              headers: {'Content-Type': 'application/json'},
+              body: requestBody)
+          .timeout(const Duration(seconds: 30));
+
+      if (resp.statusCode == 200) {
+        final recipe = _parseScreenshotRecipe(resp.body);
+        if (recipe != null) return recipe;
+      }
+      if (resp.statusCode == 503 || resp.statusCode == 429) {
+        debugPrint('[screenshot-gemini] $model busy; trying next.');
+        continue;
+      }
+      if (resp.statusCode == 404) {
+        debugPrint('[screenshot-gemini] $model not found; trying next.');
+        continue;
+      }
+      debugPrint('[screenshot-gemini] $model HTTP ${resp.statusCode}');
+    } on TimeoutException {
+      debugPrint('[screenshot-gemini] $model timed out; trying next.');
+      continue;
+    } catch (e) {
+      debugPrint('[screenshot-gemini] $model error: $e; trying next.');
+      continue;
+    }
   }
 
-  final bodyWithMime = _buildBody();
-  final bodyWithoutMime = _buildBody(withJsonMime: false);
-
-  for (int pass = 1; pass <= 2; pass++) {
-    if (pass == 2) {
-      debugPrint('[Gemini-screenshot] All models busy; waiting 5s…');
-      await Future.delayed(const Duration(seconds: 5));
-    }
-    for (final model in _kGeminiModels) {
-      // Try with responseMimeType first, then without (some models reject it).
-      var recipe = await _requestScreenshotRecipe(
-        model: model,
-        body: bodyWithMime,
-      );
-      if (recipe == null) {
-        recipe = await _requestScreenshotRecipe(
-          model: model,
-          body: bodyWithoutMime,
-        );
+  // One retry pass after a short delay.
+  await Future.delayed(const Duration(seconds: 4));
+  for (final model in _kGeminiModels) {
+    final uri = Uri.parse(
+        '$_kGeminiBase$model:generateContent?key=$kGeminiApiKey');
+    try {
+      final resp = await http
+          .post(uri,
+              headers: {'Content-Type': 'application/json'},
+              body: requestBody)
+          .timeout(const Duration(seconds: 30));
+      if (resp.statusCode == 200) {
+        final recipe = _parseScreenshotRecipe(resp.body);
+        if (recipe != null) return recipe;
       }
-      if (recipe != null) return recipe;
-    }
+    } catch (_) {}
   }
   return null;
 }
 
-Future<Recipe?> _requestScreenshotRecipe({
-  required String model,
-  required String body,
+/// Entry point called by [RecipeImportScreen].
+///
+/// [onProgress] is called with human-readable status strings so the UI can
+/// update its loading message in real time.
+Future<Recipe?> extractRecipeFromScreenshots(
+  List<Uint8List> imageBytesList, {
+  List<String>? mimeTypes,
+  void Function(String message)? onProgress,
 }) async {
-  final uri = Uri.parse(
-    '$_kGeminiBase$model:generateContent?key=$kGeminiApiKey',
-  );
-  try {
-    debugPrint('[Gemini-screenshot] Trying $model…');
-    final resp = await http
-        .post(uri, headers: {'Content-Type': 'application/json'}, body: body)
-        .timeout(const Duration(seconds: 90));
+  if (imageBytesList.isEmpty) return null;
 
-    if (resp.statusCode == 200) {
-      return _parseScreenshotRecipe(resp.body);
-    }
-    if (resp.statusCode == 404 || resp.statusCode == 503 ||
-        resp.statusCode == 429) {
-      debugPrint('[Gemini-screenshot] $model → ${resp.statusCode}; skipping.');
-      return null;
-    }
-    debugPrint('[Gemini-screenshot] $model HTTP ${resp.statusCode}');
-    return null;
-  } on TimeoutException {
-    debugPrint('[Gemini-screenshot] $model timed out.');
-    return null;
-  } catch (e) {
-    debugPrint('[Gemini-screenshot] $model error: $e');
+  if (kGeminiApiKey.isEmpty) {
+    debugPrint('[screenshot] GEMINI_API_KEY missing.');
     return null;
   }
+
+  // Step 1 — OCR via Magic server.
+  final n = imageBytesList.length;
+  onProgress?.call(
+      'Reading $n screenshot${n == 1 ? '' : 's'} via server…');
+  final ocrText = await _ocrImages(imageBytesList);
+
+  if (ocrText.trim().isEmpty) {
+    debugPrint('[screenshot] OCR returned no text — cannot extract recipe.');
+    return null;
+  }
+
+  // Step 2 — Parse recipe from OCR text via Gemini (text-only).
+  onProgress?.call('Extracting recipe…');
+  return _extractRecipeFromOcrText(ocrText);
 }
 
 Recipe? _parseScreenshotRecipe(String responseBody) {
