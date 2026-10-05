@@ -422,114 +422,199 @@ Future<String> _ocrImages(List<Uint8List> imageBytesList) async {
   return parts.join('\n\n');
 }
 
-/// Sends [rawText] (already extracted from screenshots) to Gemini and returns
-/// a structured [Recipe], or null on failure.
-///
-/// Uses text-only Gemini — same path as "Surprise Me!" so it is proven to work.
-Future<Recipe?> _extractRecipeFromOcrText(String rawText) async {
+/// Parses a recipe from raw OCR text using heuristic rules.
+/// Runs entirely client-side — no Gemini or any other network call.
+Recipe? _parseOcrRecipe(String rawText) {
   if (rawText.trim().isEmpty) return null;
 
-  final prompt =
-      'You are a recipe extraction assistant for a low-vision cooking app.\n'
-      'The following text was extracted from one or more recipe screenshots.\n'
-      'A single recipe may be split across multiple images — merge all '
-      'content into ONE recipe, removing obvious duplicates.\n\n'
-      'EXTRACTED TEXT:\n$rawText\n\n'
-      'Rules:\n'
-      '- Preserve exact quantities and measurements shown in the text.\n'
-      '- Do NOT invent information not in the text.\n'
-      '- Return ONLY a valid JSON object — no markdown, no explanation.\n\n'
-      '{\n'
-      '  "name": "Recipe Name",\n'
-      '  "estimatedTimeMinutes": 30,\n'
-      '  "difficulty": 2,\n'
-      '  "dietaryPreferences": [],\n'
-      '  "allergens": [],\n'
-      '  "ingredients": [\n'
-      '    {"name": "flour", "quantity": "2 cups"}\n'
-      '  ],\n'
-      '  "steps": [\n'
-      '    "Preheat oven to 350\u00b0F.",\n'
-      '    "Mix flour and butter."\n'
-      '  ]\n'
-      '}\n\n'
-      'Field rules:\n'
-      '- name: recipe title (string).\n'
-      '- estimatedTimeMinutes: integer, default 30 if not found.\n'
-      '- difficulty: 1–5 integer (1=easy, 5=very hard), default 2.\n'
-      '- dietaryPreferences: e.g. ["Vegetarian","Gluten-Free"] or [].\n'
-      '- allergens: e.g. ["Dairy","Eggs","Wheat / Gluten","Nuts","Soy"] or [].\n'
-      '- ingredients: [{name, quantity}] — quantity "" when not shown.\n'
-      '- steps: array of instruction strings, [] if not visible.';
+  final lines = rawText
+      .split(RegExp(r'\r?\n'))
+      .map((l) => l.trim())
+      .where((l) => l.isNotEmpty)
+      .toList();
 
-  final requestBody = jsonEncode({
-    'contents': [
-      {
-        'parts': [
-          {'text': prompt},
-        ],
-      },
-    ],
-    'generationConfig': {
-      'temperature': 0.2,
-      'maxOutputTokens': 4096,
-      'responseMimeType': 'application/json',
-    },
-  });
+  if (lines.isEmpty) return null;
 
-  // Try every model once with a short 30-second timeout — text requests are
-  // fast, so a single pass is sufficient.
-  for (final model in _kGeminiModels) {
-    final uri = Uri.parse(
-        '$_kGeminiBase$model:generateContent?key=$kGeminiApiKey');
-    try {
-      debugPrint('[screenshot-gemini] Trying $model…');
-      final resp = await http
-          .post(uri,
-              headers: {'Content-Type': 'application/json'},
-              body: requestBody)
-          .timeout(const Duration(seconds: 30));
+  // ── Identify section boundaries ──────────────────────────────────────────
+  final _ingHeaders = RegExp(
+      r'^(ingredients?|what you.?ll need|you.?ll need)\s*:?\s*$',
+      caseSensitive: false);
+  final _stepHeaders = RegExp(
+      r'^(instructions?|directions?|method|steps?|preparation|how to make'
+      r'|how to prepare|how to cook)\s*:?\s*$',
+      caseSensitive: false);
+  final _toolHeaders = RegExp(
+      r'^(tools?|equipment|utensils?|you will need|what you need)\s*:?\s*$',
+      caseSensitive: false);
+  final _stopHeaders = RegExp(
+      r'^(notes?|tips?|nutrition|serving|storage|faqs?|related|comments?'
+      r'|similar recipes?)\s*:?\s*$',
+      caseSensitive: false);
 
-      if (resp.statusCode == 200) {
-        final recipe = _parseScreenshotRecipe(resp.body);
-        if (recipe != null) return recipe;
-      }
-      if (resp.statusCode == 503 || resp.statusCode == 429) {
-        debugPrint('[screenshot-gemini] $model busy; trying next.');
-        continue;
-      }
-      if (resp.statusCode == 404) {
-        debugPrint('[screenshot-gemini] $model not found; trying next.');
-        continue;
-      }
-      debugPrint('[screenshot-gemini] $model HTTP ${resp.statusCode}');
-    } on TimeoutException {
-      debugPrint('[screenshot-gemini] $model timed out; trying next.');
-      continue;
-    } catch (e) {
-      debugPrint('[screenshot-gemini] $model error: $e; trying next.');
-      continue;
+  final ingLines = <String>[];
+  final stepLines = <String>[];
+  final toolLines = <String>[];
+  String? section;
+
+  for (final line in lines) {
+    if (_ingHeaders.hasMatch(line)) { section = 'ing'; continue; }
+    if (_stepHeaders.hasMatch(line)) { section = 'step'; continue; }
+    if (_toolHeaders.hasMatch(line)) { section = 'tool'; continue; }
+    if (_stopHeaders.hasMatch(line)) { section = null; continue; }
+    switch (section) {
+      case 'ing':  ingLines.add(line);  break;
+      case 'step': stepLines.add(line); break;
+      case 'tool': toolLines.add(line); break;
     }
   }
 
-  // One retry pass after a short delay.
-  await Future.delayed(const Duration(seconds: 4));
-  for (final model in _kGeminiModels) {
-    final uri = Uri.parse(
-        '$_kGeminiBase$model:generateContent?key=$kGeminiApiKey');
-    try {
-      final resp = await http
-          .post(uri,
-              headers: {'Content-Type': 'application/json'},
-              body: requestBody)
-          .timeout(const Duration(seconds: 30));
-      if (resp.statusCode == 200) {
-        final recipe = _parseScreenshotRecipe(resp.body);
-        if (recipe != null) return recipe;
-      }
-    } catch (_) {}
+  // ── Recipe name ──────────────────────────────────────────────────────────
+  final skipLine = RegExp(
+      r'^(http|www\.|©|copyright|\d+\s*(serving|yield|calorie|min|hour|star))',
+      caseSensitive: false);
+  String name = '';
+  for (final l in lines.take(12)) {
+    final ll = l.toLowerCase();
+    if (skipLine.hasMatch(ll)) continue;
+    if (_ingHeaders.hasMatch(l) || _stepHeaders.hasMatch(l)) continue;
+    if (l.length < 3) continue;
+    if (RegExp(r'^[\d\s\.\-\|:]+$').hasMatch(l)) continue; // pure numbers/symbols
+    name = l;
+    break;
   }
-  return null;
+
+  // ── Time ────────────────────────────────────────────────────────────────
+  int timeMinutes = 0;
+  final fullText = rawText.toLowerCase();
+
+  // Try "total time: 1 hr 30 min" first
+  final totalRe = RegExp(
+      r'total\s+time[:\s]+(?:(\d+)\s*(?:hours?|hrs?|h)[\s,]*)?'
+      r'(?:(\d+)\s*(?:minutes?|mins?|m))?',
+      caseSensitive: false);
+  final tm = totalRe.firstMatch(fullText);
+  if (tm != null) {
+    timeMinutes = (int.tryParse(tm.group(1) ?? '') ?? 0) * 60
+                + (int.tryParse(tm.group(2) ?? '') ?? 0);
+  }
+
+  // Sum prep + cook if no total found
+  if (timeMinutes == 0) {
+    final subRe = RegExp(
+        r'(?:prep|cook|preparation|bake|baking|chill|rest)\s+time[:\s]+'
+        r'(?:(\d+)\s*(?:hours?|hrs?|h)[\s,]*)?(?:(\d+)\s*(?:minutes?|mins?|m))?',
+        caseSensitive: false);
+    for (final m in subRe.allMatches(fullText)) {
+      timeMinutes += (int.tryParse(m.group(1) ?? '') ?? 0) * 60
+                   + (int.tryParse(m.group(2) ?? '') ?? 0);
+    }
+  }
+
+  // Fallback: first standalone "X minutes"
+  if (timeMinutes == 0) {
+    final minRe = RegExp(r'\b(\d{1,3})\s*(?:minutes?|mins?)\b', caseSensitive: false);
+    final m = minRe.firstMatch(fullText);
+    if (m != null) timeMinutes = int.tryParse(m.group(1)!) ?? 0;
+  }
+  if (timeMinutes <= 0 || timeMinutes > 1440) timeMinutes = 30;
+
+  // ── Ingredients ──────────────────────────────────────────────────────────
+  final ingredients = <RecipeIngredient>[];
+  final bulletRe = RegExp(r'^[\•\-\*\·\–\—\d]+[\.\):]?\s*');
+  for (final raw in ingLines) {
+    final line = raw.replaceFirst(bulletRe, '').trim();
+    if (line.isEmpty) continue;
+    final qty = _ocrSplitQty(line);
+    final cleanName = qty.$2.isEmpty ? line : qty.$2;
+    if (cleanName.length < 2) continue;
+    ingredients.add(RecipeIngredient(cleanName, quantity: qty.$1));
+  }
+
+  // ── Steps ────────────────────────────────────────────────────────────────
+  final steps = <String>[];
+  // Lines that start with a number are likely separate steps even without a
+  // section header — use them if we found no step section.
+  final src = stepLines.isNotEmpty
+      ? stepLines
+      : lines.where((l) => RegExp(r'^\d+[\.\):]').hasMatch(l)).toList();
+  final numRe = RegExp(r'^\d+[\.\):\s]+');
+  for (final raw in src) {
+    final s = raw.replaceFirst(numRe, '').replaceFirst(bulletRe, '').trim();
+    if (s.length < 5) continue;
+    steps.add(s);
+  }
+
+  // ── Tools ────────────────────────────────────────────────────────────────
+  final tools = <String>[];
+  for (final raw in toolLines) {
+    final t = raw.replaceFirst(bulletRe, '').trim();
+    if (t.isNotEmpty) tools.add(t);
+  }
+  // If no tool section, infer from steps using existing rule-based helper
+  // (defined in recipe_import_screen.dart — keep tools empty here; the
+  //  import screen calls /extract-tools after this function returns).
+
+  // ── Dietary ──────────────────────────────────────────────────────────────
+  final dietary = <String>[];
+  if (RegExp(r'\bvegan\b', caseSensitive: false).hasMatch(rawText)) dietary.add('Vegan');
+  else if (RegExp(r'\bvegetarian\b', caseSensitive: false).hasMatch(rawText)) dietary.add('Vegetarian');
+  if (RegExp(r'\bgluten.?free\b', caseSensitive: false).hasMatch(rawText)) dietary.add('Gluten-Free');
+  if (RegExp(r'\bdairy.?free\b', caseSensitive: false).hasMatch(rawText)) dietary.add('Dairy-Free');
+  if (dietary.isEmpty) dietary.add('No Restrictions');
+
+  // ── Allergens ────────────────────────────────────────────────────────────
+  final allergens = <String>[];
+  final ingText = ingredients.map((i) => i.name.toLowerCase()).join(' ');
+  final allText = '$fullText $ingText';
+  if (RegExp(r'\b(milk|cream|cheese|butter|dairy|yogurt|whey)\b').hasMatch(allText)) allergens.add('Dairy');
+  if (RegExp(r'\b(egg|eggs)\b').hasMatch(allText)) allergens.add('Eggs');
+  if (RegExp(r'\b(flour|wheat|bread|pasta|gluten|soy\s+sauce|spaghetti|noodle)\b').hasMatch(allText)) allergens.add('Wheat / Gluten');
+  if (RegExp(r'\b(peanut|almond|walnut|cashew|pecan|hazelnut|pistachio|nut)\b').hasMatch(allText)) allergens.add('Nuts');
+  if (RegExp(r'\b(soy|tofu|edamame|miso|tempeh)\b').hasMatch(allText)) allergens.add('Soy');
+  if (RegExp(r'\b(shrimp|prawn|crab|lobster|shellfish|clam|oyster|mussel)\b').hasMatch(allText)) allergens.add('Shellfish');
+  if (RegExp(r'\b(fish|salmon|tuna|cod|tilapia|halibut|anchov)\b').hasMatch(allText)) allergens.add('Fish');
+
+  // ── Difficulty ───────────────────────────────────────────────────────────
+  int difficulty = 2;
+  if (RegExp(r'\b(very\s+easy|beginner|simple|quick)\b', caseSensitive: false).hasMatch(rawText)) difficulty = 1;
+  else if (RegExp(r'\b(easy|basic)\b', caseSensitive: false).hasMatch(rawText)) difficulty = 2;
+  else if (RegExp(r'\b(medium|intermediate|moderate)\b', caseSensitive: false).hasMatch(rawText)) difficulty = 3;
+  else if (RegExp(r'\b(hard|difficult|advanced|challenging)\b', caseSensitive: false).hasMatch(rawText)) difficulty = 4;
+  else if (RegExp(r'\b(very\s+hard|expert|professional)\b', caseSensitive: false).hasMatch(rawText)) difficulty = 5;
+
+  return Recipe(
+    id: 'screenshot_${DateTime.now().millisecondsSinceEpoch}',
+    name: name.isEmpty ? 'Imported Recipe' : name,
+    category: kImportedCategory,
+    estimatedTimeMinutes: timeMinutes,
+    difficulty: difficulty,
+    dietaryPreferences: dietary,
+    allergens: allergens,
+    ingredients: ingredients,
+    tools: const [], // caller populates via /extract-tools
+    steps: steps,
+    isImported: true,
+  );
+}
+
+/// Light quantity/name splitter for OCR ingredient lines.
+/// "2 cups flour" → ("2 cups", "flour")
+/// "1/2 teaspoon salt" → ("1/2 teaspoon", "salt")
+(String, String) _ocrSplitQty(String text) {
+  const units =
+      r'cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|'
+      r'grams?|g|kg|ml|liters?|l|cans?|bunches?|cloves?|slices?|pieces?|'
+      r'packages?|pkg|bags?|boxes?|sticks?|sprigs?|pinch|to taste|as needed';
+  final re = RegExp(
+      r'^([\d\.\-\u00bc\u00bd\u00be\u2153\u2154\u215b\u215c\u215d\u215e'
+      r'\/\s]+(?:$units)?)\s+(.*)',
+      caseSensitive: false);
+  final m = re.firstMatch(text);
+  if (m != null) return (m.group(1)!.trim(), m.group(2)!.trim());
+  // Leading number only ("3 eggs")
+  final nm = RegExp(r'^([\d\.\-\/\u00bc\u00bd\u00be]+)\s+(.+)').firstMatch(text);
+  if (nm != null) return (nm.group(1)!.trim(), nm.group(2)!.trim());
+  return ('', text);
 }
 
 /// Entry point called by [RecipeImportScreen].
@@ -548,125 +633,21 @@ Future<Recipe?> extractRecipeFromScreenshots(
     return null;
   }
 
-  // Step 1 — OCR via Magic server.
+  // Step 1 — OCR via Magic server /extract-text (same endpoint used by
+  //           the shelf/pantry scanner — no changes needed on the server).
   final n = imageBytesList.length;
-  onProgress?.call(
-      'Reading $n screenshot${n == 1 ? '' : 's'} via server…');
+  onProgress?.call('Reading $n screenshot${n == 1 ? '' : 's'}…');
   final ocrText = await _ocrImages(imageBytesList);
 
   if (ocrText.trim().isEmpty) {
-    debugPrint('[screenshot] OCR returned no text — cannot extract recipe.');
+    debugPrint('[screenshot] OCR returned no text.');
     return null;
   }
 
-  // Step 2 — Parse recipe from OCR text via Gemini (text-only).
+  // Step 2 — Parse entirely client-side (no Gemini, no extra network call).
   onProgress?.call('Extracting recipe…');
-  return _extractRecipeFromOcrText(ocrText);
+  return _parseOcrRecipe(ocrText);
 }
 
-Recipe? _parseScreenshotRecipe(String responseBody) {
-  try {
-    final decoded = jsonDecode(responseBody) as Map<String, dynamic>;
-    final candidates = decoded['candidates'] as List?;
-    if (candidates == null || candidates.isEmpty) return null;
-
-    final content = (candidates.first as Map<String, dynamic>)['content']
-        as Map<String, dynamic>?;
-    final parts = content?['parts'] as List?;
-    if (parts == null || parts.isEmpty) return null;
-
-    var rawText = parts
-        .map((p) =>
-            p is Map && p['text'] is String ? p['text'] as String : '')
-        .join()
-        .trim();
-
-    if (rawText.startsWith('```')) {
-      rawText = rawText.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
-      rawText = rawText.replaceFirst(RegExp(r'\s*```$'), '');
-    }
-
-    final map = jsonDecode(rawText);
-    if (map is! Map) return null;
-
-    final id = 'screenshot_${DateTime.now().millisecondsSinceEpoch}';
-    return _recipeFromScreenshotMap(Map<String, dynamic>.from(map), id: id);
-  } catch (e) {
-    debugPrint('[Gemini-screenshot] parse error: $e');
-    return null;
-  }
-}
-
-/// Maps a Gemini JSON response to a [Recipe] for screenshot-imported recipes.
-/// Parses allergens (which [_recipeFromMap] does not) and sets [isImported].
-Recipe _recipeFromScreenshotMap(
-  Map<String, dynamic> m, {
-  required String id,
-}) {
-  String s(String key) => _asString(m[key]).trim();
-  int i(String key, int fallback) {
-    final v = m[key];
-    if (v is int) return v;
-    if (v is double) return v.round();
-    if (v is String) return int.tryParse(v) ?? fallback;
-    return fallback;
-  }
-
-  final ingredients = <RecipeIngredient>[];
-  final rawIngs = m['ingredients'];
-  if (rawIngs is List) {
-    for (final item in rawIngs) {
-      if (item is Map) {
-        final name = _asString(item['name']).trim();
-        final qty = _asString(item['quantity']).trim();
-        if (name.isNotEmpty) ingredients.add(RecipeIngredient(name, quantity: qty));
-      } else {
-        final name = _asString(item).trim();
-        if (name.isNotEmpty) ingredients.add(RecipeIngredient(name));
-      }
-    }
-  }
-
-  final steps = <String>[];
-  final rawSteps = m['steps'];
-  if (rawSteps is List) {
-    for (final step in rawSteps) {
-      final text = _asString(step).trim();
-      if (text.isNotEmpty) steps.add(text);
-    }
-  }
-
-  final dietaryPrefs = <String>[];
-  final rawDiet = m['dietaryPreferences'];
-  if (rawDiet is List) {
-    for (final pref in rawDiet) {
-      final text = _asString(pref).trim();
-      if (text.isNotEmpty) dietaryPrefs.add(text);
-    }
-  }
-  if (dietaryPrefs.isEmpty) dietaryPrefs.add('No Restrictions');
-
-  final allergens = <String>[];
-  final rawAllergens = m['allergens'];
-  if (rawAllergens is List) {
-    for (final allergen in rawAllergens) {
-      final text = _asString(allergen).trim();
-      if (text.isNotEmpty) allergens.add(text);
-    }
-  }
-
-  final name = s('name');
-  return Recipe(
-    id: id,
-    name: name.isEmpty ? 'Imported Recipe' : name,
-    category: kImportedCategory,
-    estimatedTimeMinutes: i('estimatedTimeMinutes', 30),
-    difficulty: i('difficulty', 2).clamp(1, 5),
-    dietaryPreferences: dietaryPrefs,
-    allergens: allergens,
-    ingredients: ingredients,
-    tools: const [], // caller populates from /extract-tools
-    steps: steps,
-    isImported: true,
-  );
-}
+// (Gemini Vision / JSON-mapping helpers removed — screenshot import now uses
+//  OCR + client-side heuristic parsing; no Gemini call needed for screenshots.)
