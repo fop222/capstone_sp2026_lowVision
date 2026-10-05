@@ -156,37 +156,55 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
 
       final body = buf.toString().trimRight();
 
-      // ── Build mailto URI ──────────────────────────────────────────────────
-      // Use Uri.encodeQueryComponent so spaces become %20 (not +), which is
-      // correct for mailto: URIs.
+      // ── Encode for use in all URI schemes ────────────────────────────────
+      // Uri.encodeQueryComponent → %20 for spaces (correct for mailto + web).
       final encodedSubject = Uri.encodeQueryComponent(subject);
-      final encodedBody = Uri.encodeQueryComponent(body);
-      final mailtoUri =
-          Uri.parse('mailto:?subject=$encodedSubject&body=$encodedBody');
+      final encodedBody    = Uri.encodeQueryComponent(body);
 
-      // ── Launch ────────────────────────────────────────────────────────────
-      if (!await canLaunchUrl(mailtoUri)) {
-        if (!mounted) return;
+      // ── Fallback chain: mailto → Gmail → Outlook ──────────────────────────
+      // 1. Default mail app (mailto:)
+      // 2. Gmail web  (always opens in browser — most reliable universal fallback)
+      // 3. Outlook app URI scheme (opens Outlook if installed)
+      final candidates = <Uri>[
+        Uri.parse('mailto:?subject=$encodedSubject&body=$encodedBody'),
+        Uri.parse(
+          'https://mail.google.com/mail/?view=cm&fs=1'
+          '&su=$encodedSubject&body=$encodedBody',
+        ),
+        Uri.parse(
+          'ms-outlook://compose?subject=$encodedSubject&body=$encodedBody',
+        ),
+      ];
+
+      bool launched = false;
+      for (final uri in candidates) {
+        try {
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+            launched = true;
+            break;
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+
+      if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'No email app found. Please set up an email account on '
-              'this device and try again.',
+              'Could not open any email app. '
+              'Please install Gmail or Outlook and try again.',
             ),
             duration: Duration(seconds: 4),
           ),
         );
-        return;
       }
-
-      await launchUrl(mailtoUri);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Could not open the email app. Please try again.',
-          ),
+          content: Text('Could not open the email app. Please try again.'),
           duration: Duration(seconds: 4),
         ),
       );
