@@ -940,7 +940,14 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final lines = vlmAnswer
         .split(RegExp(r'\r?\n'))
         .map((l) => l.trim().replaceFirst(RegExp(r'^[\d\.\-\*\•]+\s*'), ''))
-        .where((l) => l.isNotEmpty && l.toUpperCase() != 'NONE')
+        .where((l) {
+          if (l.isEmpty) return false;
+          // Strip the "| location" suffix to check just the food name.
+          final foodPart = l.contains('|') ? l.split('|').first.trim() : l;
+          if (foodPart.toUpperCase() == 'NONE') return false;
+          if (foodPart.toUpperCase() == 'NO ITEMS FOUND') return false;
+          return true;
+        })
         .toSet() // deduplicate
         .toList();
     if (lines.isEmpty) return '';
@@ -1228,8 +1235,15 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final lines = answer
         .split(RegExp(r'\r?\n'))
         .map((l) => l.trim())
-        // Drop empty lines and lines that look like preamble/explanation text
-        .where((l) => l.isNotEmpty && !l.endsWith(':'));
+        // Drop empty lines, preamble/explanation text, and sentinel NONE lines.
+        .where((l) {
+          if (l.isEmpty) return false;
+          if (l.endsWith(':')) return false;
+          // Skip lines whose food-name part is literally "NONE" (model sentinel).
+          final foodPart = l.contains('|') ? l.split('|').first.trim() : l;
+          if (foodPart.toUpperCase() == 'NONE') return false;
+          return true;
+        });
 
     for (final line in lines) {
       // Parse "ItemName | region" format (region is optional for robustness).
@@ -1604,11 +1618,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
             : 'Could not confirm $wanted on this shelf. Tap Scan Shelf to try again.';
       } else {
         if (widget.pantryMode) {
-          final detected = _pantryDetectedDisplay(vlmAnswer);
+          // Show ONLY the matched items (not raw VLM output) so the display is
+          // accurate — users were confused seeing unmatched items listed here.
           final matchedNames = _englishNameList(foundTargets.map((e) => e.name).toList());
-          shelfUser = detected.isEmpty
-              ? 'Found in pantry: $matchedNames'
-              : 'Detected in pantry:\n$detected';
+          shelfUser = 'Found in your pantry:\n${foundTargets.map((e) => '• ${e.name}').join('\n')}'
+              '\n\nConfirm each item below.';
         } else {
           final deduped = _shelfDisplayFromVlmAnswer(vlmAnswer);
           shelfUser = deduped.isEmpty
@@ -1689,11 +1703,15 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       return;
     }
 
-    // Pantry mode: announce only the matched ingredient names, not the full
-    // VLM brand/size/location output.
+    // Pantry mode: announce the matched ingredient names, with multi-item hint.
     if (widget.pantryMode && foundTargets.isNotEmpty) {
       final names = _englishNameList(foundTargets.map((i) => i.name).toList());
-      await _speak('$names detected.');
+      if (foundTargets.length > 1) {
+        await _speak(
+            '$names detected. I will ask you about each item one at a time.');
+      } else {
+        await _speak('$names detected.');
+      }
     } else {
       await _announceTts(shelfUser);
     }
