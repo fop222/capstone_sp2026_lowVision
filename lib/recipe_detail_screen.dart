@@ -162,39 +162,24 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       final encodedBody    = Uri.encodeQueryComponent(body);
 
       // ── Fallback chain: mailto → Gmail → Outlook ──────────────────────────
-      // 1. Default mail app (mailto:)
-      // 2. Gmail web  (always opens in browser — most reliable universal fallback)
-      // 3. Outlook app URI scheme (opens Outlook if installed)
-      final candidates = <Uri>[
-        Uri.parse('mailto:?subject=$encodedSubject&body=$encodedBody'),
-        Uri.parse(
-          'https://mail.google.com/mail/?view=cm&fs=1'
-          '&su=$encodedSubject&body=$encodedBody',
-        ),
-        Uri.parse(
-          'ms-outlook://compose?subject=$encodedSubject&body=$encodedBody',
-        ),
-      ];
+      // Open Gmail app only (googlemail:// = native Gmail on Android/iOS)
+      final gmailUri = Uri.parse(
+        'googlegmail://co?subject=$encodedSubject&body=$encodedBody',
+      );
 
       bool launched = false;
-      for (final uri in candidates) {
-        try {
-          if (await canLaunchUrl(uri)) {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-            launched = true;
-            break;
-          }
-        } catch (_) {
-          continue;
+      try {
+        if (await canLaunchUrl(gmailUri)) {
+          await launchUrl(gmailUri, mode: LaunchMode.externalApplication);
+          launched = true;
         }
-      }
+      } catch (_) {}
 
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Could not open any email app. '
-              'Please install Gmail or Outlook and try again.',
+              'Gmail app not found. Please install Gmail and try again.',
             ),
             duration: Duration(seconds: 4),
           ),
