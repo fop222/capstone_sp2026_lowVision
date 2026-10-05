@@ -157,9 +157,11 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       final body = buf.toString().trimRight();
 
       // ── Encode for use in all URI schemes ────────────────────────────────
-      // Uri.encodeQueryComponent → %20 for spaces (correct for mailto + web).
-      final encodedSubject = Uri.encodeQueryComponent(subject);
-      final encodedBody    = Uri.encodeQueryComponent(body);
+      // encodeQueryComponent uses + for spaces; Gmail needs %20 — replace them.
+      String _gmailEncode(String s) =>
+          Uri.encodeQueryComponent(s).replaceAll('+', '%20');
+      final encodedSubject = _gmailEncode(subject);
+      final encodedBody    = _gmailEncode(body);
 
       // ── Fallback chain: mailto → Gmail → Outlook ──────────────────────────
       // Open Gmail app directly via its URI scheme.
