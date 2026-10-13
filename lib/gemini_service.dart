@@ -534,14 +534,26 @@ Recipe? _parseOcrRecipe(String rawText) {
   final steps = <String>[];
   // Lines that start with a number are likely separate steps even without a
   // section header — use them if we found no step section.
+  final numberedLines = lines.where((l) => RegExp(r'^\d+[\.\):]').hasMatch(l)).toList();
   final src = stepLines.isNotEmpty
       ? stepLines
-      : lines.where((l) => RegExp(r'^\d+[\.\):]').hasMatch(l)).toList();
+      : numberedLines;
   final numRe = RegExp(r'^\d+[\.\):\s]+');
   for (final raw in src) {
     final s = raw.replaceFirst(numRe, '').replaceFirst(bulletRe, '').trim();
     if (s.length < 5) continue;
     steps.add(s);
+  }
+
+  // ── Last-resort fallback: no sections found at all ───────────────────────
+  // If we got OCR text but no structured sections, treat non-name lines as
+  // steps so at least something useful is shown.
+  if (ingredients.isEmpty && steps.isEmpty && lines.length > 1) {
+    for (final l in lines.skip(1)) {
+      if (l == name) continue;
+      if (l.length < 4) continue;
+      steps.add(l);
+    }
   }
 
   // ── Tools ────────────────────────────────────────────────────────────────
@@ -627,11 +639,6 @@ Future<Recipe?> extractRecipeFromScreenshots(
   void Function(String message)? onProgress,
 }) async {
   if (imageBytesList.isEmpty) return null;
-
-  if (kGeminiApiKey.isEmpty) {
-    debugPrint('[screenshot] GEMINI_API_KEY missing.');
-    return null;
-  }
 
   // Step 1 — OCR via Magic server /extract-text (same endpoint used by
   //           the shelf/pantry scanner — no changes needed on the server).
