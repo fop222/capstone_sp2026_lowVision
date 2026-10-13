@@ -207,10 +207,13 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
       );
 
       if (recipe == null) {
+        // _screenshotLoadingMessage may already say why (e.g. server unreachable)
+        final hint = _screenshotLoadingMessage.startsWith('⚠')
+            ? _screenshotLoadingMessage
+            : 'Could not read text from the image. '
+              'Make sure the Magic server is running and your phone is on the same network.';
         setState(() {
-          _screenshotError =
-              'Could not extract a recipe from the selected screenshots. '
-              'Try selecting clearer images or add more screenshots.';
+          _screenshotError = hint;
           _screenshotLoading = false;
         });
         return;

@@ -645,15 +645,21 @@ Future<Recipe?> extractRecipeFromScreenshots(
   final n = imageBytesList.length;
   onProgress?.call('Reading $n screenshot${n == 1 ? '' : 's'}…');
   final ocrText = await _ocrImages(imageBytesList);
+  debugPrint('[screenshot] OCR text length: ${ocrText.length}');
+  debugPrint('[screenshot] OCR text preview: ${ocrText.substring(0, ocrText.length.clamp(0, 300))}');
 
   if (ocrText.trim().isEmpty) {
-    debugPrint('[screenshot] OCR returned no text.');
+    debugPrint('[screenshot] OCR returned no text — server may be unreachable.');
+    onProgress?.call('⚠ Could not read text from image (server unreachable?)');
     return null;
   }
 
   // Step 2 — Parse entirely client-side (no Gemini, no extra network call).
   onProgress?.call('Extracting recipe…');
-  return _parseOcrRecipe(ocrText);
+  final parsed = _parseOcrRecipe(ocrText);
+  debugPrint('[screenshot] Parsed: name="${parsed?.name}", '
+      'ingredients=${parsed?.ingredients.length}, steps=${parsed?.steps.length}');
+  return parsed;
 }
 
 // (Gemini Vision / JSON-mapping helpers removed — screenshot import now uses
