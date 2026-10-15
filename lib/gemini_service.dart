@@ -643,24 +643,49 @@ Recipe? _parseOcrRecipe(String rawText) {
   final ingredients = <RecipeIngredient>[];
   final bulletRe = RegExp(r'^[\u2022\-\*\u00b7\u2013\u2014]+\s*');
 
-  void addIngredient(String raw) {
-    final line = raw.replaceFirst(bulletRe, '').trim();
-    if (line.isEmpty) return;
-    final qty = _ocrSplitQty(line);
-    final cleanName = qty.$2.isEmpty ? line : qty.$2;
-    if (cleanName.length < 2) return;
-    final key = cleanName.toLowerCase();
-    if (ingredients.any((i) => i.name.toLowerCase() == key)) return;
-    ingredients.add(RecipeIngredient(cleanName, quantity: qty.$1));
+  void addMergedIngredients(List<String> rawLines) {
+    final pendingQty = <String>[];
+    final names = <String>[];
+
+    void flush() {
+      final name = names.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+      final qty = _tidyQuantity(pendingQty.join(' '));
+      names.clear();
+      pendingQty.clear();
+      if (name.length < 2 || _isUnitWord(name)) return;
+      final key = name.toLowerCase();
+      if (ingredients.any((i) => i.name.toLowerCase() == key)) return;
+      ingredients.add(RecipeIngredient(name, quantity: qty));
+    }
+
+    for (final raw in rawLines) {
+      final line = raw.replaceFirst(bulletRe, '').trim();
+      if (line.isEmpty) continue;
+      final split = _ocrSplitQty(line);
+      if (split.$2.isEmpty) {
+        if (split.$1.isEmpty) continue;
+        if (names.isNotEmpty) flush();
+        pendingQty.add(split.$1);
+        continue;
+      }
+      if (split.$1.isNotEmpty) {
+        if (names.isNotEmpty || pendingQty.isNotEmpty) flush();
+        pendingQty.add(split.$1);
+        names.add(split.$2);
+        flush();
+        continue;
+      }
+      names.add(split.$2);
+    }
+    flush();
   }
 
-  for (final raw in ingLines) {
-    addIngredient(raw);
-  }
-
-  // OCR often misses the "Ingredients" heading. Pull quantity lines out of
-  // the rest of the text so Start Shopping still has something to list.
-  if (ingredients.isEmpty) {
+  if (ingLines.isNotEmpty) {
+    addMergedIngredients(ingLines);
+  } else {
+    // OCR often misses the "Ingredients" heading. Pull quantity lines out of
+    // the rest of the text so Start Shopping still has something to list.
+    final recovered = <String>[];
     for (final line in lines) {
       if (line == name) continue;
       if (_headerWithOptionalItem(_kIngHeader, line) ||
@@ -668,8 +693,17 @@ Recipe? _parseOcrRecipe(String rawText) {
           _headerWithOptionalItem(_kToolHeader, line)) {
         continue;
       }
-      if (_looksLikeIngredientLine(line)) addIngredient(line);
+      if (_looksLikeIngredientLine(line) ||
+          _ocrSplitQty(line).$1.isNotEmpty ||
+          recovered.isNotEmpty && !_looksLikeIngredientLine(line) &&
+              !RegExp(r'^\d+[\.\)]').hasMatch(line)) {
+        // Keep food-name fragments that follow a quantity ("1 cup" then
+        // "organic frozen mixed berries") and stop at a numbered step.
+        if (RegExp(r'^\d+[\.\)]\s+[A-Za-z]').hasMatch(line)) break;
+        recovered.add(line);
+      }
     }
+    addMergedIngredients(recovered);
   }
 
   // ── Steps ────────────────────────────────────────────────────────────────
@@ -692,9 +726,9 @@ Recipe? _parseOcrRecipe(String rawText) {
   if (steps.isEmpty && lines.length > 1) {
     for (final l in lines.skip(1)) {
       if (l == name) continue;
+      if (ingLines.contains(l)) continue;
       if (l.length < 4) continue;
-      if (_looksLikeIngredientLine(l)) {
-        if (ingredients.isEmpty) addIngredient(l);
+      if (_looksLikeIngredientLine(l) || _ocrSplitQty(l).$1.isNotEmpty) {
         continue;
       }
       if (_headerWithOptionalItem(_kIngHeader, l) ||
@@ -760,25 +794,59 @@ Recipe? _parseOcrRecipe(String rawText) {
   );
 }
 
+const _kUnitPattern =
+    r"cups?|tablespoons?|tbsp\.?|teaspoons?|tsp\.?|ounces?|oz\.?|pounds?|lbs?\.?|grams?|kilograms?|kg|ml|milliliters?|liters?|cloves?|slices?|pieces?|cans?|bunches?|pinch(?:es)?|sticks?|packages?|pkg|bags?|boxes?|sprigs?";
+
+bool _isUnitWord(String text) => RegExp(
+      '^(?:$_kUnitPattern)\$',
+      caseSensitive: false,
+    ).hasMatch(text.trim());
+
+/// Puts the number before the unit: "cup 1" → "1 cup".
+String _tidyQuantity(String qty) {
+  final parts = qty
+      .split(RegExp(r'\s+'))
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty)
+      .toList();
+  final numbers = <String>[];
+  final units = <String>[];
+  for (final part in parts) {
+    if (_isUnitWord(part)) {
+      units.add(part);
+    } else {
+      numbers.add(part);
+    }
+  }
+  return [...numbers, ...units].join(' ');
+}
+
 /// Light quantity/name splitter for OCR ingredient lines.
 /// "2 cups flour" → ("2 cups", "flour")
+/// "1 cup" → ("1 cup", "") so the food name on the next line can attach
 /// "1/2 teaspoon salt" → ("1/2 teaspoon", "salt")
 (String, String) _ocrSplitQty(String text) {
-  const units =
-      r'cups?|tablespoons?|tbsp|teaspoons?|tsp|ounces?|oz|pounds?|lbs?|'
-      r'grams?|g|kg|ml|liters?|l|cans?|bunches?|cloves?|slices?|pieces?|'
-      r'packages?|pkg|bags?|boxes?|sticks?|sprigs?|pinch|to taste|as needed';
+  final t = text.trim();
+  if (t.isEmpty) return ('', '');
+  if (_isUnitWord(t) || RegExp(r'^[\d./\u00bc\u00bd\u00be\u2153\u2154]+$').hasMatch(t)) {
+    return (t, '');
+  }
   final re = RegExp(
-    '^([\\d.\\-\u00bc\u00bd\u00be\u2153\u2154\u215b\u215c\u215d\u215e/\\s]+'
-    '(?:$units)?)\\s+(.*)',
+    '^(?<qty>\\d+\\s+\\d+/\\d+|\\d+/\\d+|\\d+(?:\\.\\d+)?|[\\u00bc\\u00bd\\u00be\\u2153\\u2154])'
+    '(?:\\s+(?<unit>$_kUnitPattern))?'
+    '(?:\\s+(?<name>.+))?\$',
     caseSensitive: false,
   );
-  final m = re.firstMatch(text);
-  if (m != null) return (m.group(1)!.trim(), m.group(2)!.trim());
-  // Leading number only ("3 eggs")
-  final nm = RegExp(r'^([\d\.\-\/\u00bc\u00bd\u00be]+)\s+(.+)').firstMatch(text);
-  if (nm != null) return (nm.group(1)!.trim(), nm.group(2)!.trim());
-  return ('', text);
+  final m = re.firstMatch(t);
+  if (m == null) return ('', t);
+  final number = (m.namedGroup('qty') ?? '').trim();
+  final unit = (m.namedGroup('unit') ?? '').trim();
+  final name = (m.namedGroup('name') ?? '').trim();
+  final qty = [number, unit].where((s) => s.isNotEmpty).join(' ');
+  if (name.isEmpty || _isUnitWord(name)) {
+    return (_tidyQuantity('$qty $name'), '');
+  }
+  return (qty, name);
 }
 
 /// Entry point called by [RecipeImportScreen].

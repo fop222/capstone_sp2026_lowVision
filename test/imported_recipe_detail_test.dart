@@ -24,6 +24,14 @@ Smoothie Bowl
       recipe.ingredients.map((i) => i.name.toLowerCase()),
       containsAll(['yogurt', 'granola', 'berries', 'honey']),
     );
+    expect(
+      recipe.ingredients.firstWhere((i) => i.name.toLowerCase() == 'yogurt').quantity,
+      '1 cup',
+    );
+    expect(
+      recipe.ingredients.any((i) => _isOnlyUnit(i.name)),
+      isFalse,
+    );
     expect(recipe.steps, isNotEmpty);
     expect(
       recipe.steps.any((s) => s.toLowerCase().contains('yogurt')),
@@ -33,6 +41,36 @@ Smoothie Bowl
       recipe.steps.any((s) => _looksLikeQty(s)),
       isFalse,
     );
+  });
+
+  test('a split OCR line keeps the food name and the cup amount', () {
+    final recipe = debugParseOcrRecipe('''
+Smoothie Bowl
+Ingredients:
+1
+cup
+organic
+frozen
+mixed
+berries
+1/2 cup
+granola
+''');
+
+    expect(recipe, isNotNull);
+    final berries = recipe!.ingredients.firstWhere(
+      (i) => i.name.toLowerCase().contains('berries'),
+    );
+    expect(berries.name.toLowerCase(), 'organic frozen mixed berries');
+    expect(berries.quantity.toLowerCase(), '1 cup');
+    expect(
+      recipe.ingredients.any((i) => i.name.toLowerCase() == 'cup'),
+      isFalse,
+    );
+    final granola = recipe.ingredients.firstWhere(
+      (i) => i.name.toLowerCase().contains('granola'),
+    );
+    expect(granola.quantity.toLowerCase(), '1/2 cup');
   });
 
   test('imported recipe keeps steps in the session and hides them on the page',
@@ -115,6 +153,11 @@ Smoothie Bowl
     expect(toolsY, lessThan(shoppingY));
   });
 }
+
+bool _isOnlyUnit(String name) => RegExp(
+      r'^(cups?|tablespoons?|teaspoons?|tbsp|tsp)$',
+      caseSensitive: false,
+    ).hasMatch(name.trim());
 
 bool _looksLikeQty(String line) => RegExp(
       r'^\d+(?:/\d+)?\s+(?:cup|tablespoon)',
