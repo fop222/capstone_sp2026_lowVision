@@ -463,6 +463,69 @@ Future<(String text, String? error)> _ocrImages(
   return (parts.join('\n\n'), null);
 }
 
+/// Visible for tests. Screenshot import uses this to turn OCR text into a recipe.
+@visibleForTesting
+Recipe? debugParseOcrRecipe(String rawText) => _parseOcrRecipe(rawText);
+
+final _kIngHeader = RegExp(
+  r"^(?:ingredients?|what you(?:'|’)?ll need|what you need|you(?:'|’)?ll need)\s*:?\s*(.*)$",
+  caseSensitive: false,
+);
+final _kStepHeader = RegExp(
+  r'^(?:instructions?|directions?|method|steps|preparation|how to make|how to prepare|how to cook)\s*:?\s*(.*)$',
+  caseSensitive: false,
+);
+final _kToolHeader = RegExp(
+  r'^(?:tools?|equipment|utensils?|you will need)\s*:?\s*(.*)$',
+  caseSensitive: false,
+);
+final _kStopHeader = RegExp(
+  r'^(?:notes?|tips?|nutrition|servings?|storage|faqs?|related|comments?|similar recipes?)\s*:?\s*(.*)$',
+  caseSensitive: false,
+);
+
+String _normHeaderLine(String line) =>
+    line.replaceAll('\u2019', "'").replaceAll('`', "'").trim();
+
+/// Quantity lines such as "1 cup yogurt" or "2 eggs". Numbered instructions
+/// such as "1. Add the yogurt" are not ingredients.
+bool _looksLikeIngredientLine(String line) {
+  final t = line
+      .replaceFirst(RegExp(r'^[\u2022\-\*\u00b7\u2013\u2014]\s*'), '')
+      .trim();
+  if (t.isEmpty) return false;
+  if (RegExp(r'^\d+[\.\)]\s+[A-Za-z]').hasMatch(t) &&
+      !RegExp(
+        r'^\d+[\.\)]\s*(?:cups?|tbsp|tablespoons?|tsp|teaspoons?)\b',
+        caseSensitive: false,
+      ).hasMatch(t)) {
+    return false;
+  }
+  const units =
+      r"cups?|tablespoons?|tbsp\.?|teaspoons?|tsp\.?|ounces?|oz\.?|pounds?|lbs?\.?|grams?|kilograms?|kg|ml|liters?|cloves?|slices?|pieces?|cans?|bunches?|pinch(?:es)?|sticks?";
+  if (RegExp(
+    '^(?:\\d+\\s+\\d+/\\d+|\\d+/\\d+|\\d+(?:\\.\\d+)?|[\\u00bc\\u00bd\\u00be\\u2153\\u2154])\\s*(?:$units)\\b',
+    caseSensitive: false,
+  ).hasMatch(t)) {
+    return true;
+  }
+  if (RegExp('^(?:$units)\\s+\\S', caseSensitive: false).hasMatch(t)) {
+    return true;
+  }
+  return RegExp(
+    r'^(\d+|[\u00bc\u00bd\u00be])\s+(?!minutes?\b|mins?\b|hours?\b|hrs?\b|seconds?\b|steps?\b|add\b|mix\b|stir\b|pour\b|bake\b|cook\b|heat\b|preheat\b|serve\b|place\b|combine\b|whisk\b|blend\b|top\b|drizzle\b)[A-Za-z]',
+    caseSensitive: false,
+  ).hasMatch(t);
+}
+
+bool _headerWithOptionalItem(RegExp header, String line) {
+  final match = header.firstMatch(_normHeaderLine(line));
+  if (match == null) return false;
+  final rest = (match.group(1) ?? '').trim();
+  if (rest.isEmpty) return true;
+  return _looksLikeIngredientLine(rest) || RegExp(r'^\d').hasMatch(rest);
+}
+
 /// Parses a recipe from raw OCR text using heuristic rules.
 /// Runs entirely client-side — no Gemini or any other network call.
 Recipe? _parseOcrRecipe(String rawText) {
@@ -477,35 +540,47 @@ Recipe? _parseOcrRecipe(String rawText) {
   if (lines.isEmpty) return null;
 
   // ── Identify section boundaries ──────────────────────────────────────────
-  final _ingHeaders = RegExp(
-      r'^(ingredients?|what you.?ll need|you.?ll need)\s*:?\s*$',
-      caseSensitive: false);
-  final _stepHeaders = RegExp(
-      r'^(instructions?|directions?|method|steps?|preparation|how to make'
-      r'|how to prepare|how to cook)\s*:?\s*$',
-      caseSensitive: false);
-  final _toolHeaders = RegExp(
-      r'^(tools?|equipment|utensils?|you will need|what you need)\s*:?\s*$',
-      caseSensitive: false);
-  final _stopHeaders = RegExp(
-      r'^(notes?|tips?|nutrition|serving|storage|faqs?|related|comments?'
-      r'|similar recipes?)\s*:?\s*$',
-      caseSensitive: false);
-
   final ingLines = <String>[];
   final stepLines = <String>[];
   final toolLines = <String>[];
   String? section;
 
   for (final line in lines) {
-    if (_ingHeaders.hasMatch(line)) { section = 'ing'; continue; }
-    if (_stepHeaders.hasMatch(line)) { section = 'step'; continue; }
-    if (_toolHeaders.hasMatch(line)) { section = 'tool'; continue; }
-    if (_stopHeaders.hasMatch(line)) { section = null; continue; }
+    if (_headerWithOptionalItem(_kIngHeader, line)) {
+      section = 'ing';
+      final rest =
+          (_kIngHeader.firstMatch(_normHeaderLine(line))?.group(1) ?? '')
+              .trim();
+      if (rest.isNotEmpty) ingLines.add(rest);
+      continue;
+    }
+    if (_headerWithOptionalItem(_kStepHeader, line)) {
+      section = 'step';
+      final rest =
+          (_kStepHeader.firstMatch(_normHeaderLine(line))?.group(1) ?? '')
+              .trim();
+      if (rest.isNotEmpty) stepLines.add(rest);
+      continue;
+    }
+    if (_headerWithOptionalItem(_kToolHeader, line)) {
+      section = 'tool';
+      final rest =
+          (_kToolHeader.firstMatch(_normHeaderLine(line))?.group(1) ?? '')
+              .trim();
+      if (rest.isNotEmpty) toolLines.add(rest);
+      continue;
+    }
+    if (_kStopHeader.hasMatch(_normHeaderLine(line))) {
+      section = null;
+      continue;
+    }
     switch (section) {
-      case 'ing':  ingLines.add(line);  break;
-      case 'step': stepLines.add(line); break;
-      case 'tool': toolLines.add(line); break;
+      case 'ing':
+        ingLines.add(line);
+      case 'step':
+        stepLines.add(line);
+      case 'tool':
+        toolLines.add(line);
     }
   }
 
@@ -517,8 +592,13 @@ Recipe? _parseOcrRecipe(String rawText) {
   for (final l in lines.take(12)) {
     final ll = l.toLowerCase();
     if (skipLine.hasMatch(ll)) continue;
-    if (_ingHeaders.hasMatch(l) || _stepHeaders.hasMatch(l)) continue;
+    if (_headerWithOptionalItem(_kIngHeader, l) ||
+        _headerWithOptionalItem(_kStepHeader, l) ||
+        _headerWithOptionalItem(_kToolHeader, l)) {
+      continue;
+    }
     if (l.length < 3) continue;
+    if (_looksLikeIngredientLine(l)) continue;
     if (RegExp(r'^[\d\s\.\-\|:]+$').hasMatch(l)) continue; // pure numbers/symbols
     name = l;
     break;
@@ -561,38 +641,68 @@ Recipe? _parseOcrRecipe(String rawText) {
 
   // ── Ingredients ──────────────────────────────────────────────────────────
   final ingredients = <RecipeIngredient>[];
-  final bulletRe = RegExp(r'^[\•\-\*\·\–\—\d]+[\.\):]?\s*');
-  for (final raw in ingLines) {
+  final bulletRe = RegExp(r'^[\u2022\-\*\u00b7\u2013\u2014]+\s*');
+
+  void addIngredient(String raw) {
     final line = raw.replaceFirst(bulletRe, '').trim();
-    if (line.isEmpty) continue;
+    if (line.isEmpty) return;
     final qty = _ocrSplitQty(line);
     final cleanName = qty.$2.isEmpty ? line : qty.$2;
-    if (cleanName.length < 2) continue;
+    if (cleanName.length < 2) return;
+    final key = cleanName.toLowerCase();
+    if (ingredients.any((i) => i.name.toLowerCase() == key)) return;
     ingredients.add(RecipeIngredient(cleanName, quantity: qty.$1));
+  }
+
+  for (final raw in ingLines) {
+    addIngredient(raw);
+  }
+
+  // OCR often misses the "Ingredients" heading. Pull quantity lines out of
+  // the rest of the text so Start Shopping still has something to list.
+  if (ingredients.isEmpty) {
+    for (final line in lines) {
+      if (line == name) continue;
+      if (_headerWithOptionalItem(_kIngHeader, line) ||
+          _headerWithOptionalItem(_kStepHeader, line) ||
+          _headerWithOptionalItem(_kToolHeader, line)) {
+        continue;
+      }
+      if (_looksLikeIngredientLine(line)) addIngredient(line);
+    }
   }
 
   // ── Steps ────────────────────────────────────────────────────────────────
   final steps = <String>[];
   // Lines that start with a number are likely separate steps even without a
   // section header — use them if we found no step section.
-  final numberedLines = lines.where((l) => RegExp(r'^\d+[\.\):]').hasMatch(l)).toList();
-  final src = stepLines.isNotEmpty
-      ? stepLines
-      : numberedLines;
+  final numberedLines =
+      lines.where((l) => RegExp(r'^\d+[\.\):]').hasMatch(l)).toList();
+  final src = stepLines.isNotEmpty ? stepLines : numberedLines;
   final numRe = RegExp(r'^\d+[\.\):\s]+');
   for (final raw in src) {
+    if (_looksLikeIngredientLine(raw)) continue;
     final s = raw.replaceFirst(numRe, '').replaceFirst(bulletRe, '').trim();
     if (s.length < 5) continue;
     steps.add(s);
   }
 
   // ── Last-resort fallback: no sections found at all ───────────────────────
-  // If we got OCR text but no structured sections, treat non-name lines as
-  // steps so at least something useful is shown.
-  if (ingredients.isEmpty && steps.isEmpty && lines.length > 1) {
+  // Keep instruction-like lines as steps. Ingredient lines stay ingredients.
+  if (steps.isEmpty && lines.length > 1) {
     for (final l in lines.skip(1)) {
       if (l == name) continue;
       if (l.length < 4) continue;
+      if (_looksLikeIngredientLine(l)) {
+        if (ingredients.isEmpty) addIngredient(l);
+        continue;
+      }
+      if (_headerWithOptionalItem(_kIngHeader, l) ||
+          _headerWithOptionalItem(_kStepHeader, l) ||
+          _headerWithOptionalItem(_kToolHeader, l) ||
+          _kStopHeader.hasMatch(_normHeaderLine(l))) {
+        continue;
+      }
       steps.add(l);
     }
   }
