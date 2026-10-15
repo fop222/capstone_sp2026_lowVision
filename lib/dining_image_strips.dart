@@ -20,6 +20,32 @@ const List<(String, double, double)> kDiningStrips = [
 /// three uploads fast.
 const int _kMaxStripSide = 1024;
 
+/// Photos at or under this size upload as they are.
+const int _kMaxUploadBytes = 1500 * 1024;
+const int _kMaxPhotoSide = 1280;
+
+/// Scales a large gallery photo (often 4-6 MB from a tablet) down before
+/// upload. The server resizes to 768px anyway, and Vercel rejects request
+/// bodies over 4.5 MB. Returns the original bytes if it is already small or
+/// cannot be decoded.
+Future<Uint8List> shrinkDiningPhoto(Uint8List photo) async {
+  if (photo.lengthInBytes <= _kMaxUploadBytes) return photo;
+  try {
+    final codec = await ui.instantiateImageCodec(photo);
+    final source = (await codec.getNextFrame()).image;
+    try {
+      final png = await _cropPng(source, 0, 1, maxSide: _kMaxPhotoSide);
+      return png != null && png.lengthInBytes < photo.lengthInBytes
+          ? png
+          : photo;
+    } finally {
+      source.dispose();
+    }
+  } catch (_) {
+    return photo;
+  }
+}
+
 Future<List<({String column, Uint8List png})>> cropDiningStrips(
   Uint8List photo,
 ) async {
@@ -37,12 +63,17 @@ Future<List<({String column, Uint8List png})>> cropDiningStrips(
   return strips;
 }
 
-Future<Uint8List?> _cropPng(ui.Image source, double start, double end) async {
+Future<Uint8List?> _cropPng(
+  ui.Image source,
+  double start,
+  double end, {
+  int maxSide = _kMaxStripSide,
+}) async {
   final left = source.width * start;
   final width = source.width * (end - start);
   final height = source.height.toDouble();
   final longest = width > height ? width : height;
-  final scale = longest > _kMaxStripSide ? _kMaxStripSide / longest : 1.0;
+  final scale = longest > maxSide ? maxSide / longest : 1.0;
   final outWidth = (width * scale).round();
   final outHeight = (height * scale).round();
   if (outWidth < 1 || outHeight < 1) return null;

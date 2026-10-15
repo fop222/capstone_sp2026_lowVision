@@ -33,6 +33,31 @@ void main() {
     });
   });
 
+  testWidgets('small photos upload unchanged', (tester) async {
+    await tester.runAsync(() async {
+      final photo = await _photo(800, 600);
+      expect(identical(await shrinkDiningPhoto(photo), photo), isTrue);
+    });
+  });
+
+  testWidgets('a multi-megabyte photo is shrunk to 1280px before upload', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      // Trailing bytes after the PNG end are ignored by decoders; they make
+      // the file as heavy as a tablet gallery photo.
+      final heavy = Uint8List.fromList([
+        ...await _photo(3200, 2400),
+        ...List.filled(3 * 1024 * 1024, 0),
+      ]);
+      final shrunk = await shrinkDiningPhoto(heavy);
+      expect(shrunk.lengthInBytes, lessThan(heavy.lengthInBytes));
+      final image = await _decode(shrunk);
+      expect(image.width, 1280);
+      expect(image.height, 960);
+    });
+  });
+
   testWidgets('large photos are scaled down before upload', (tester) async {
     await tester.runAsync(() async {
       final strips = await cropDiningStrips(await _photo(4000, 3000));

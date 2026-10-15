@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -15,6 +16,13 @@ import 'grocery_ui.dart';
 import 'ocr_config.dart';
 import 'take_picture_screen.dart' show backCamerasOnly;
 
+/// One `/predict` call; the Vercel proxy itself gives up at 60 s.
+const Duration _kCallTimeout = Duration(seconds: 45);
+
+/// Strips are only started while this much time remains, so a crowded photo
+/// adds at most about a minute.
+const Duration _kCloserLookBudget = Duration(seconds: 50);
+
 /// Captures or uploads one dining photo and sends it through `/predict`.
 class DiningScanScreen extends StatefulWidget {
   const DiningScanScreen({super.key});
@@ -29,6 +37,8 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   bool _takingPicture = false;
   bool _analyzing = false;
   bool _lookingCloser = false;
+  int _elapsed = 0;
+  Timer? _progressTimer;
   String? _cameraError;
   String? _statusError;
   Uint8List? _previewBytes;
@@ -50,17 +60,24 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
 
   @override
   void dispose() {
+    _progressTimer?.cancel();
     _camera?.dispose();
     _tts.stop();
     super.dispose();
   }
 
+  /// Voice setup polls the browser for up to ~1.5 s; do it once per screen.
+  late final Future<void> _ttsReady = applyEnglishTts(_tts).catchError((_) {});
+
+  /// Speaks [text]. Never blocks a scan: Android Chrome sometimes never
+  /// reports that speech finished, which used to leave "Analyzing foods…" on
+  /// screen forever before the photo was even sent.
   Future<void> _speak(String text) async {
     try {
-      await applyEnglishTts(_tts);
-      await _tts.speak(text);
+      await _ttsReady.timeout(const Duration(seconds: 3));
+      await _tts.speak(text).timeout(const Duration(seconds: 6));
     } catch (error) {
-      debugPrint('Dining TTS unavailable: $error');
+      debugPrint('Dining TTS unavailable or slow: $error');
     }
   }
 
@@ -163,17 +180,27 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       _analyzing = true;
       _lookingCloser = false;
       _statusError = null;
+      _elapsed = 0;
     });
-    await _speak('Analyzing foods.');
+    unawaited(_speak('Analyzing foods.'));
+    // Visible seconds and a periodic spoken update, so a long scan never
+    // looks or sounds frozen.
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return timer.cancel();
+      setState(() => _elapsed++);
+      if (_elapsed % 20 == 0) unawaited(_speak('Still working.'));
+    });
 
-    final result = await _runDiningPredict(bytes);
+    final result = await _runDiningPredict(await shrinkDiningPhoto(bytes));
+    _progressTimer?.cancel();
     if (!mounted) return;
     setState(() => _analyzing = false);
 
     if (!result.isValid) {
       final message = result.error ?? kDiningParseError;
       setState(() => _statusError = message);
-      await _speak(message);
+      unawaited(_speak(message));
       await _restartCamera();
       return;
     }
@@ -181,7 +208,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     final count = result.foods.length == 1
         ? '1 food'
         : '${result.foods.length} foods';
-    await _speak('Found $count.');
+    unawaited(_speak('Found $count.'));
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -202,8 +229,9 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       ..fields['question'] = kDiningVlmPrompt
       ..fields['task'] = kDiningVlmTask
       ..fields['max_tokens'] = '$kDiningMaxTokens';
-    final response = await request.send().timeout(const Duration(seconds: 90));
-    final body = await response.stream.bytesToString();
+    // The Vercel proxy stops at 60 s; a normal call takes 5-20 s.
+    final response = await request.send().timeout(_kCallTimeout);
+    final body = await response.stream.bytesToString().timeout(_kCallTimeout);
     if (response.statusCode != 200) return null;
     final decoded = jsonDecode(body);
     if (decoded is! Map) return '';
@@ -226,11 +254,18 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       // Crowded photo: the model repeated one food instead of naming each
       // pan. Look at the left, center, and right separately.
       if (mounted) setState(() => _lookingCloser = true);
-      await _speak('Looking closer at each part of the photo.');
+      unawaited(_speak('Looking closer at each part of the photo.'));
       final answers = <({String column, String raw})>[];
+      final deadline = DateTime.now().add(_kCloserLookBudget);
       for (final strip in await cropDiningStrips(bytes)) {
-        final raw = await _askVlm(strip.png, 'dining_${strip.column}.png');
-        if (raw != null) answers.add((column: strip.column, raw: raw));
+        // Out of time: keep what we have rather than make the user wait.
+        if (DateTime.now().isAfter(deadline)) break;
+        try {
+          final raw = await _askVlm(strip.png, 'dining_${strip.column}.png');
+          if (raw != null) answers.add((column: strip.column, raw: raw));
+        } catch (error) {
+          debugPrint('Dining strip ${strip.column} failed: $error');
+        }
       }
       final closer = parseDiningStrips(answers);
       return closer.foods.length > full.foods.length ? closer : full;
@@ -277,9 +312,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
                 const CircularProgressIndicator(color: kBrandPurpleLight),
                 const SizedBox(height: 16),
                 Text(
-                  _lookingCloser
-                      ? 'Looking closer at each part…'
-                      : 'Analyzing foods…',
+                  '${_lookingCloser ? 'Looking closer at each part…' : 'Analyzing foods…'}  ${_elapsed}s',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 22,
