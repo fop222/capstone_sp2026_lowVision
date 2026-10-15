@@ -25,24 +25,28 @@ const String kVisualAllergenSafety =
     'Ingredients and allergens could not be confirmed visually. Please ask dining staff before eating if you have dietary restrictions or allergies.';
 
 /// Prompt for one buffet, station, plate, tray, or mixed dining photo.
+///
+/// Tuned against Qwen3-VL-2B on buffet lines, close-up pans, and plates.
+/// Asking for a count first and a compact object per food keeps the small
+/// model from looping; generic names like "salad" are banned because it
+/// otherwise uses them for every dish.
 const String kDiningVlmPrompt = '''
-You scan one dining photo for the low-vision app Lumio. The photo may show a long buffet line, serving pans, a dining hall station, a counter, a plate, a tray, bowls, or a crowded mix of those. Layouts vary. Use relative position only. Do not assume a fixed number of rows or columns.
+Look at this dining photo. It may show a buffet line, serving pans, a station, a plate, a tray, or a close-up of one dish.
+First count how many separate pans, bowls, or portions of food you can see. Then describe each one exactly once, left to right, then top to bottom. If a sign or label names a food, use the words on the sign.
 
-Return ONLY valid JSON, no markdown and no extra text:
-{"foods":[{"dish_name":"","location":"","confidence":"high","sign_text":"","allergens":[],"dietary_preferences":[],"information_source":"sign","warning":""}]}
+Name each food specifically by its main ingredient and color, the way a person would say it out loud. Never use a general word like "salad", "sauce", "meat", or "food" by itself; say which kind (the main vegetable, meat, grain, or color).
 
-Include every distinct food as its own object. Do not stop after the first food. Keep similar-looking foods separate when they are in different places.
+Return ONLY compact JSON on one line, no other text:
+{"count":0,"foods":[{"dish_name":"...","location":"...","sign_text":"","information_source":"visual estimate","confidence":"medium"}]}
 
-location must be exactly one of: top left, top center, top right, middle left, middle center, middle right, bottom left, bottom center, bottom right.
-
-Read a nearby sign or label before guessing. If a sign names the food, set dish_name from that sign, copy the readable sign into sign_text, set information_source to "sign", and copy only allergens and dietary words written on the sign. Sign examples: Vegetarian, Vegan, Gluten-Free, Contains Dairy, Contains Nuts. Do not replace sign facts with a visual guess. If the sign is unclear or only partly readable, put the readable part in sign_text, set confidence to "low" or "medium", and say the sign is unclear in warning.
-
-If no readable sign exists, set information_source to "visual estimate" and estimate the dish. Use confidence "medium" or "low". Do not invent exact ingredients. Dietary tags must start with "Possibly". Allergens are only possible, never confirmed. warning must say the exact dish could not be confirmed.
-
-If you cannot tell what a food is, set dish_name to "Unidentified food", information_source to "unknown", confidence to "low", and explain that in warning.
-
-confidence is "high" only when a readable sign clearly names the dish. Never present visual allergens or dietary labels as confirmed fact.
-''';
+Rules:
+- foods has exactly "count" objects, one per pan, bowl, or portion, then the JSON ends.
+- No two objects have the same dish_name.
+- location is where that food sits in the photo frame: top left, top center, top right, middle left, middle center, middle right, bottom left, bottom center, or bottom right. Several foods may share a location.
+- sign_text is only text you can actually read on a sign or label in the photo; otherwise "".
+- information_source is "sign" with confidence "high" only when you read the dish name on a sign; then add "allergens" and "dietary_preferences" lists with only the words on the sign.
+- Otherwise information_source is "visual estimate" with confidence "medium" or "low". Do not invent exact ingredients.
+- Use "Unidentified food" only when a food cannot be described at all.''';
 
 const List<String> kDiningLocations = [
   'top left',
@@ -149,6 +153,11 @@ class DiningFood {
   /// Notices shown under the facts. Estimated and unknown results always
   /// include both the Lumio uncertainty sentence and a staff redirect.
   List<String> get notices {
+    // Nothing was identified, so a stack of "could not confirm" paragraphs
+    // adds no information. One staff redirect is enough.
+    if (informationSource == DiningInfoSource.unknown) {
+      return const [kLumioCouldNotConfirm];
+    }
     final lines = <String>[];
     if (warning.trim().isNotEmpty) lines.add(warning.trim());
     if (hasEstimatedOrUnknown) {
@@ -198,10 +207,15 @@ DiningParseResult parseDiningResponse(String raw) {
     return const DiningParseResult(foods: [], error: kDiningParseError);
   }
 
+  // The small VLM often loops, repeating one food until the token limit.
+  // A repeated name is far more likely a loop than a second pan, so keep
+  // only the first of each.
   final foods = <DiningFood>[];
+  final seenNames = <String>{};
   for (final entry in entries) {
     final food = _foodFromMap(entry);
-    if (food != null) foods.add(food);
+    if (food == null) continue;
+    if (seenNames.add(food.dishName.toLowerCase().trim())) foods.add(food);
   }
 
   final sorted = sortDiningFoods(foods);
@@ -474,6 +488,13 @@ List<Map<String, dynamic>>? _foodEntries(Object? decoded) {
   return null;
 }
 
+/// The model labels a food it could not name with one of these, sometimes
+/// while still claiming a visual estimate.
+final _unidentifiedName = RegExp(
+  r'^(unidentified|unknown|unrecognized|unclear)\s+(food|dish|item)$',
+  caseSensitive: false,
+);
+
 const _junkNames = {
   'none',
   'n/a',
@@ -496,6 +517,11 @@ DiningFood? _foodFromMap(Map<String, dynamic> map) {
     _stringValue(map['information_source']),
     signText: signText,
   );
+  if (_unidentifiedName.hasMatch(dish)) {
+    dish = 'Unidentified food';
+    source = DiningInfoSource.unknown;
+    warning = '';
+  }
   if (source == DiningInfoSource.sign && signText.isEmpty) {
     source = DiningInfoSource.visualEstimate;
     warning = _append(warning, 'No readable sign text was returned.');

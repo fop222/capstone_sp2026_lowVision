@@ -5,7 +5,9 @@ void main() {
   group('dining prompt', () {
     test('asks for every food, sign priority, and uncertain allergens', () {
       expect(kDiningVlmPrompt, contains('"foods"'));
-      expect(kDiningVlmPrompt, contains('Do not stop after the first food'));
+      expect(kDiningVlmPrompt, contains('"count"'));
+      expect(kDiningVlmPrompt, contains('describe each one exactly once'));
+      expect(kDiningVlmPrompt, contains('No two objects have the same'));
       for (final location in kDiningLocations) {
         expect(kDiningVlmPrompt, contains(location));
       }
@@ -278,6 +280,31 @@ void main() {
       expect(parseDiningResponse('I see lasagna and soup.').isValid, isFalse);
       expect(parseDiningResponse('{"foods":[]}').isValid, isFalse);
       expect(parseDiningResponse('').error, kDiningParseError);
+    });
+
+    test('a looping answer keeps one entry per food name', () {
+      final result = parseDiningResponse('''
+        {"count":5,"foods":[
+          {"dish_name":"Meatballs","location":"top center","information_source":"visual estimate"},
+          {"dish_name":"Red sauce","location":"top center","information_source":"visual estimate"},
+          {"dish_name":"meatballs","location":"top center","information_source":"visual estimate"},
+          {"dish_name":"Red sauce","location":"bottom left","information_source":"visual estimate"},
+          {"dish_name":"Meatballs","location":"top right","information_source":"visual estimate"}
+        ]}
+      ''');
+      expect(result.foods.map((f) => f.dishName), ['Meatballs', 'Red sauce']);
+    });
+
+    test('unidentified food shows one short notice, even as an estimate', () {
+      final result = parseDiningResponse('''
+        {"foods":[{"dish_name":"unidentified food","location":"bottom center",
+          "confidence":"low","information_source":"visual estimate",
+          "warning":"the dish could not be confirmed"}]}
+      ''');
+      final food = result.foods.single;
+      expect(food.dishName, 'Unidentified food');
+      expect(food.informationSource, DiningInfoSource.unknown);
+      expect(food.notices, [kLumioCouldNotConfirm]);
     });
 
     test('answer cut off by the token limit keeps the finished foods', () {
