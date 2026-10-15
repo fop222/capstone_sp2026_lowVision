@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'dining_screen.dart';
 import 'grocery_list_screen.dart';
 import 'grocery_ui.dart';
 import 'home_landing_screen.dart';
@@ -12,7 +13,7 @@ import 'recipe_list_screen.dart';
 import 'supabase_auth_screen.dart';
 import 'surprise_me_state.dart';
 
-/// Navigation drawer with Home, Grocery Lists, Recipes, Profile, Log Out.
+/// Navigation drawer with Home, Grocery Lists, Recipes, Dining, Profile, Log Out.
 ///
 /// Attach this to any [Scaffold] as its [Scaffold.drawer].  Flutter
 /// automatically shows a hamburger (≡) icon in the [AppBar.leading]
@@ -25,9 +26,7 @@ class AppNavigationDrawer extends StatelessWidget {
     await Supabase.instance.client.auth.signOut();
     if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(
-        builder: (_) => const SupabaseAuthScreen(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const SupabaseAuthScreen()),
       (_) => false,
     );
   }
@@ -45,9 +44,9 @@ class AppNavigationDrawer extends StatelessWidget {
   /// (used for Profile since the user expects to be able to go back).
   void _goPush(BuildContext context, Widget destination) {
     Navigator.of(context).pop(); // close drawer
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => destination),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => destination));
   }
 
   @override
@@ -109,12 +108,15 @@ class AppNavigationDrawer extends StatelessWidget {
               onTap: () => _goRoot(context, const RecipeListScreen()),
             ),
             _DrawerNavItem(
+              icon: Icons.restaurant_outlined,
+              label: 'Dining',
+              onTap: () => _goRoot(context, const DiningScreen()),
+            ),
+            _DrawerNavItem(
               icon: Icons.person_outline_rounded,
               label: 'Profile',
-              onTap: () => _goPush(
-                context,
-                const ProfileSetupScreen(isEditing: true),
-              ),
+              onTap: () =>
+                  _goPush(context, const ProfileSetupScreen(isEditing: true)),
             ),
 
             const Spacer(),
@@ -160,15 +162,10 @@ class _DrawerNavItem extends StatelessWidget {
         leading: Icon(icon, color: c, size: 28),
         title: Text(
           label,
-          style: TextStyle(
-            color: c,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(color: c, fontSize: 20, fontWeight: FontWeight.w600),
         ),
         onTap: onTap,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
         minLeadingWidth: 32,
       ),
     );

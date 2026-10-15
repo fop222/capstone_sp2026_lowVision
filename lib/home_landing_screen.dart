@@ -2,30 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'app_drawer.dart';
+import 'dining_screen.dart';
 import 'grocery_list_screen.dart';
 import 'grocery_ui.dart';
 import 'recipe_list_screen.dart';
 
-/// Top-level home after sign-in: choose Shopping, Cooking, or Eating.
+/// Top-level home after sign-in: choose Shopping, Cooking, or Dining.
 class HomeLandingScreen extends StatelessWidget {
   const HomeLandingScreen({super.key});
 
   void _openShopping(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const GroceryListScreen()),
-    );
-  }
-
-  void _comingSoon(BuildContext context, String mode) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$mode is coming soon.',
-          style: const TextStyle(fontSize: 18, color: Color(0xFF232733)),
-        ),
-        backgroundColor: kAccentMint,
-      ),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const GroceryListScreen()));
   }
 
   Widget _modeButton({
@@ -51,9 +40,7 @@ class HomeLandingScreen extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
               color: bgColor,
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.18),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
               boxShadow: [
                 BoxShadow(
                   color: kBrandPurpleMid.withValues(alpha: 0.35),
@@ -111,9 +98,9 @@ class HomeLandingScreen extends StatelessWidget {
                 maxWidth: groceryMaxContentWidth(context),
               ),
               child: SingleChildScrollView(
-                padding: groceryPagePadding(context).add(
-                  const EdgeInsets.symmetric(vertical: 32),
-                ),
+                padding: groceryPagePadding(
+                  context,
+                ).add(const EdgeInsets.symmetric(vertical: 32)),
                 child: Column(
                   children: [
                     Semantics(
@@ -153,7 +140,11 @@ class HomeLandingScreen extends StatelessWidget {
                       label: 'EATING',
                       icon: Icons.restaurant_outlined,
                       accent: const Color(0xFF8A4B08),
-                      onPressed: () => _comingSoon(context, 'Eating'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const DiningScreen(),
+                        ),
+                      ),
                     ),
                   ],
                 ),

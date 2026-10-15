@@ -93,7 +93,12 @@ def _json_error(status_code: int, message: str, tb: str | None = None):
     return jsonify(payload), status_code
 
 
-def infer_with_vlm(image_path: Path, question: str) -> str:
+def _clamp_new_tokens(value: int) -> int:
+    return max(32, min(int(value), 1024))
+
+
+def infer_with_vlm(image_path: Path, question: str, max_new_tokens: int | None = None) -> str:
+    token_limit = MAX_NEW_TOKENS if max_new_tokens is None else _clamp_new_tokens(max_new_tokens)
     if not image_path.exists():
         raise FileNotFoundError(f"Image not found: {image_path}")
 
@@ -149,13 +154,13 @@ def infer_with_vlm(image_path: Path, question: str) -> str:
                 with torch.autocast("cuda", dtype=torch.float16):
                     generated_ids = vlm_model.generate(
                         **inputs,
-                        max_new_tokens=MAX_NEW_TOKENS,
+                        max_new_tokens=token_limit,
                         do_sample=False
                     )
             else:
                 generated_ids = vlm_model.generate(
                     **inputs,
-                    max_new_tokens=MAX_NEW_TOKENS,
+                    max_new_tokens=token_limit,
                     do_sample=False
 
                 )
@@ -359,20 +364,14 @@ def predict():
     3. Output ONLY the list. No introductory or closing text."""
     )
 
-    system_message = (
-        "You are a very strict inventory assistant. "
-        "Your job is to describe every item on the shelf in a structured format exactly as instructed. "
-        "Do NOT add commentary, explanations, or prices. "
-        "Do NOT make assumptions about items you cannot clearly see. "
-        "Always include the following fields for each item:\n"
-        "- brand\n"
-        "- product_name\n"
-        "- location (use top/middle/bottom and left/center/right)\n"
-        "Output exactly one item per line, in the format:\n"
-        "brand: <brand>, product_name: <product>, location: <location>\n"
-        "Do NOT output JSON unless explicitly requested. "
-        "Follow this format strictly."
-    )
+    # Grocery callers keep the short default. Dining sends task=dining and
+    # max_tokens so one photo can return JSON for every visible food.
+    raw_max = (request.form.get("max_tokens") or "").strip()
+    task = (request.form.get("task") or "").strip().lower()
+    max_tokens = 768 if task == "dining" else MAX_NEW_TOKENS
+    if raw_max.isdigit():
+        max_tokens = _clamp_new_tokens(int(raw_max))
+
     if DEBUG_VLM_LOGS:
         print("[pantry-debug] exact prompt:\n" + question)
 
@@ -381,7 +380,7 @@ def predict():
     file.save(str(filepath))
 
     try:
-        answer = infer_with_vlm(filepath, question)
+        answer = infer_with_vlm(filepath, question, max_new_tokens=max_tokens)
         if DEBUG_VLM_LOGS:
             print("[pantry-debug] raw VLM response:\n" + answer)
         if not answer:
