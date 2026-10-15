@@ -43,6 +43,32 @@ Smoothie Bowl
     );
   });
 
+  test('cooking directions stay out of the ingredients list', () {
+    final recipe = debugParseOcrRecipe('''
+Smoothie Bowl
+Ingridients :
+1 cup organic frozen mixed berries
+1 cup frozen banana
+2 cup almond milk
+1 scoop vanilla protein powder
+1 cup mixed fruit
+1 cup granola
+Add frozen banana and mixed berries to a blender, blend on low until small bites remain. Add almond milk and protein powder; blend on low until the mixture reaches a soft serve consistency. Scoop into 1-2 serving bowls, topped with mixed fruit and granola.
+''');
+
+    expect(recipe, isNotNull);
+    expect(recipe!.ingredients.length, 6);
+    expect(
+      recipe.ingredients.any((i) => i.name.toLowerCase().contains('blender')),
+      isFalse,
+    );
+    expect(recipe.steps, isNotEmpty);
+    expect(
+      recipe.steps.any((s) => s.toLowerCase().contains('blender')),
+      isTrue,
+    );
+  });
+
   test('a split OCR line keeps the food name and the cup amount', () {
     final recipe = debugParseOcrRecipe('''
 Smoothie Bowl

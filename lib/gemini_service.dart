@@ -468,7 +468,7 @@ Future<(String text, String? error)> _ocrImages(
 Recipe? debugParseOcrRecipe(String rawText) => _parseOcrRecipe(rawText);
 
 final _kIngHeader = RegExp(
-  r"^(?:ingredients?|what you(?:'|’)?ll need|what you need|you(?:'|’)?ll need)\s*:?\s*(.*)$",
+  r"^(?:ingredients?|ingridients?|what you(?:'|’)?ll need|what you need|you(?:'|’)?ll need)\s*:?\s*(.*)$",
   caseSensitive: false,
 );
 final _kStepHeader = RegExp(
@@ -526,6 +526,35 @@ bool _headerWithOptionalItem(RegExp header, String line) {
   return _looksLikeIngredientLine(rest) || RegExp(r'^\d').hasMatch(rest);
 }
 
+/// Cooking directions — not grocery items. OCR often leaves these under
+/// "Ingredients" when there is no separate instructions heading.
+bool _looksLikeInstructionLine(String line) {
+  final t = line
+      .replaceFirst(RegExp(r'^[\u2022\-\*\u00b7\u2013\u2014]\s*'), '')
+      .trim();
+  if (t.isEmpty) return false;
+  if (RegExp(r'^\d+[\.\)]\s+', caseSensitive: false).hasMatch(t)) return true;
+  if (t.length > 72) return true;
+  const verbs =
+      r'add|blend|mix|stir|pour|bake|cook|heat|preheat|serve|top|drizzle|'
+      r'combine|whisk|scoop|simmer|boil|fry|roast|chop|slice|peel|season';
+  if (RegExp('\\b($verbs)\\b', caseSensitive: false).hasMatch(t) &&
+      RegExp(
+        r'\b(blender|bowl|bowls|pan|pot|oven|skillet|serving|until|minutes?|'
+        r'low|high|consistency|mixture)\b',
+        caseSensitive: false,
+      ).hasMatch(t)) {
+    return true;
+  }
+  if (RegExp(r'\buntil\b.*\b(blend|mix|smooth|thick|done)\b', caseSensitive: false)
+          .hasMatch(t) ||
+      RegExp(r';\s*\w', caseSensitive: false).hasMatch(t)) {
+    return true;
+  }
+  return RegExp(r'^add\s+', caseSensitive: false).hasMatch(t) &&
+      t.split(RegExp(r'\s+')).length >= 6;
+}
+
 /// Parses a recipe from raw OCR text using heuristic rules.
 /// Runs entirely client-side — no Gemini or any other network call.
 Recipe? _parseOcrRecipe(String rawText) {
@@ -574,13 +603,21 @@ Recipe? _parseOcrRecipe(String rawText) {
       section = null;
       continue;
     }
+    if (section == 'ing' && _looksLikeInstructionLine(line)) {
+      section = 'step';
+      stepLines.add(line);
+      continue;
+    }
     switch (section) {
       case 'ing':
         ingLines.add(line);
+        break;
       case 'step':
         stepLines.add(line);
+        break;
       case 'tool':
         toolLines.add(line);
+        break;
     }
   }
 
@@ -652,7 +689,12 @@ Recipe? _parseOcrRecipe(String rawText) {
       final qty = _tidyQuantity(pendingQty.join(' '));
       names.clear();
       pendingQty.clear();
-      if (name.length < 2 || _isUnitWord(name)) return;
+      if (name.length < 2 ||
+          _isUnitWord(name) ||
+          _looksLikeInstructionLine(name)) {
+        return;
+      }
+      if (name.length > 64) return;
       final key = name.toLowerCase();
       if (ingredients.any((i) => i.name.toLowerCase() == key)) return;
       ingredients.add(RecipeIngredient(name, quantity: qty));
@@ -660,7 +702,7 @@ Recipe? _parseOcrRecipe(String rawText) {
 
     for (final raw in rawLines) {
       final line = raw.replaceFirst(bulletRe, '').trim();
-      if (line.isEmpty) continue;
+      if (line.isEmpty || _looksLikeInstructionLine(line)) continue;
       final split = _ocrSplitQty(line);
       if (split.$2.isEmpty) {
         if (split.$1.isEmpty) continue;
@@ -681,7 +723,9 @@ Recipe? _parseOcrRecipe(String rawText) {
   }
 
   if (ingLines.isNotEmpty) {
-    addMergedIngredients(ingLines);
+    addMergedIngredients(
+      ingLines.where((l) => !_looksLikeInstructionLine(l)).toList(),
+    );
   } else {
     // OCR often misses the "Ingredients" heading. Pull quantity lines out of
     // the rest of the text so Start Shopping still has something to list.
