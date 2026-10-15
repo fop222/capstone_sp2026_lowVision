@@ -282,6 +282,94 @@ void main() {
       expect(parseDiningResponse('').error, kDiningParseError);
     });
 
+    test('sign text that echoes a visual guess is dropped', () {
+      final result = parseDiningResponse('''
+        {"foods":[
+          {"dish_name":"pepper","location":"bottom left","sign_text":"pepper","information_source":"visual estimate"},
+          {"dish_name":"Buns","location":"top center","sign_text":"Bun","information_source":"visual estimate"},
+          {"dish_name":"white cheese","location":"bottom left","sign_text":"BLUE CHEESE","information_source":"visual estimate"}
+        ]}
+      ''');
+      final byName = {for (final f in result.foods) f.dishName: f};
+      expect(byName['pepper']!.signText, isEmpty);
+      expect(byName['Buns']!.signText, isEmpty);
+      expect(byName['white cheese']!.signText, 'BLUE CHEESE');
+    });
+
+    test('a real sign that names the dish is kept', () {
+      final result = parseDiningResponse('''
+        {"foods":[{"dish_name":"Chicken Lasagna","location":"top left","sign_text":"Chicken Lasagna","information_source":"sign","confidence":"high"}]}
+      ''');
+      expect(result.foods.single.signText, 'Chicken Lasagna');
+      expect(result.foods.single.informationSource, DiningInfoSource.sign);
+    });
+
+    test('one sign on several foods is a station sign, not a dish label', () {
+      final result = parseDiningResponse('''
+        {"foods":[
+          {"dish_name":"potato","location":"top left","sign_text":"Köks världen allergen!","information_source":"visual estimate"},
+          {"dish_name":"meatballs","location":"top center","sign_text":"Köks världen allergen!","information_source":"visual estimate"}
+        ]}
+      ''');
+      expect(result.foods.every((f) => f.signText.isEmpty), isTrue);
+    });
+
+    test('a counted-but-repeated answer is detected as a loop', () {
+      final looped =
+          '{"count":13,"foods":['
+          '${List.filled(13, '{"dish_name":"pepper","location":"bottom left"}').join(',')}'
+          ']}';
+      expect(diningAnswerLooped(looped), isTrue);
+      expect(
+        diningAnswerLooped(
+          '{"count":8,"foods":[{"dish_name":"red cabbage"},{"dish_name":"carrots"},'
+          '{"dish_name":"white cabbage"},{"dish_name":"white cabbage"},'
+          '{"dish_name":"peppers"},{"dish_name":"white cabbage"},'
+          '{"dish_name":"white cabbage"},{"dish_name":"peppers"}]}',
+        ),
+        isFalse,
+      );
+      expect(
+        diningAnswerLooped(
+          '{"count":2,"foods":[{"dish_name":"bacon"},{"dish_name":"eggs"}]}',
+        ),
+        isFalse,
+      );
+    });
+
+    test('strip answers merge with the column taken from the strip', () {
+      final result = parseDiningStrips([
+        (
+          column: 'left',
+          raw:
+              '{"foods":[{"dish_name":"carrots","location":"bottom right"},'
+              '{"dish_name":"beets","location":"top center","sign_text":"SALAD BAR"}]}',
+        ),
+        (
+          column: 'center',
+          raw:
+              '{"foods":[{"dish_name":"carrots","location":"bottom center"},'
+              '{"dish_name":"peas","location":"middle left","sign_text":"SALAD BAR"}]}',
+        ),
+        (column: 'right', raw: 'not json'),
+      ]);
+      final byName = {for (final f in result.foods) f.dishName: f};
+      expect(byName.keys, containsAll(['carrots', 'beets', 'peas']));
+      expect(byName['carrots']!.location, 'bottom left');
+      expect(byName['beets']!.location, 'top left');
+      expect(byName['peas']!.location, 'middle center');
+      expect(byName['beets']!.signText, isEmpty);
+    });
+
+    test('the list speaks name and location only', () {
+      final food = parseDiningResponse(
+        '{"foods":[{"dish_name":"Meatballs","location":"bottom center"}]}',
+      ).foods.single;
+      expect(spokenDiningFoodBrief(food), 'Meatballs, bottom center.');
+      expect(spokenDiningFood(food), isNot(contains('This appears to be')));
+      expect(spokenDiningFood(food), isNot(contains(kLumioCouldNotConfirm)));
+    });
+
     test('a looping answer keeps one entry per food name', () {
       final result = parseDiningResponse('''
         {"count":5,"foods":[

@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'app_tts.dart';
 import 'dining_food.dart';
+import 'dining_image_strips.dart';
 import 'dining_results_screen.dart';
 import 'grocery_ui.dart';
 import 'ocr_config.dart';
@@ -27,6 +28,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   bool _cameraReady = false;
   bool _takingPicture = false;
   bool _analyzing = false;
+  bool _lookingCloser = false;
   String? _cameraError;
   String? _statusError;
   Uint8List? _previewBytes;
@@ -159,6 +161,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       _cameraReady = false;
       _previewBytes = bytes;
       _analyzing = true;
+      _lookingCloser = false;
       _statusError = null;
     });
     await _speak('Analyzing foods.');
@@ -189,35 +192,48 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     if (mounted) await _restartCamera();
   }
 
+  /// Sends one image to `/predict` and returns the model's answer text, or
+  /// null when the server failed.
+  Future<String?> _askVlm(Uint8List bytes, String filename) async {
+    final request = http.MultipartRequest('POST', vlmPredictUri())
+      ..files.add(
+        http.MultipartFile.fromBytes('image', bytes, filename: filename),
+      )
+      ..fields['question'] = kDiningVlmPrompt
+      ..fields['task'] = kDiningVlmTask
+      ..fields['max_tokens'] = '$kDiningMaxTokens';
+    final response = await request.send().timeout(const Duration(seconds: 90));
+    final body = await response.stream.bytesToString();
+    if (response.statusCode != 200) return null;
+    final decoded = jsonDecode(body);
+    if (decoded is! Map) return '';
+    return (decoded['answer'] as String? ?? '').trim();
+  }
+
   Future<DiningParseResult> _runDiningPredict(Uint8List bytes) async {
     try {
-      final request = http.MultipartRequest('POST', vlmPredictUri())
-        ..files.add(
-          http.MultipartFile.fromBytes('image', bytes, filename: 'dining.jpg'),
-        )
-        ..fields['question'] = kDiningVlmPrompt
-        ..fields['task'] = kDiningVlmTask
-        ..fields['max_tokens'] = '$kDiningMaxTokens';
-      final response = await request.send().timeout(
-        const Duration(seconds: 90),
-      );
-      final body = await response.stream.bytesToString();
-      if (response.statusCode != 200) {
+      final answer = await _askVlm(bytes, 'dining.jpg');
+      if (answer == null) {
         return const DiningParseResult(
           foods: [],
           error:
               'Lumio could not analyze this photo. Please try again or ask dining staff.',
         );
       }
-      final decoded = jsonDecode(body);
-      if (decoded is! Map) {
-        return const DiningParseResult(foods: [], error: kDiningParseError);
+      final full = parseDiningResponse(answer);
+      if (!diningAnswerLooped(answer)) return full;
+
+      // Crowded photo: the model repeated one food instead of naming each
+      // pan. Look at the left, center, and right separately.
+      if (mounted) setState(() => _lookingCloser = true);
+      await _speak('Looking closer at each part of the photo.');
+      final answers = <({String column, String raw})>[];
+      for (final strip in await cropDiningStrips(bytes)) {
+        final raw = await _askVlm(strip.png, 'dining_${strip.column}.png');
+        if (raw != null) answers.add((column: strip.column, raw: raw));
       }
-      final answer = (decoded['answer'] as String? ?? '').trim();
-      if (answer.isEmpty) {
-        return const DiningParseResult(foods: [], error: kDiningParseError);
-      }
-      return parseDiningResponse(answer);
+      final closer = parseDiningStrips(answers);
+      return closer.foods.length > full.foods.length ? closer : full;
     } catch (error) {
       debugPrint('Dining predict error: $error');
       return const DiningParseResult(
@@ -254,14 +270,16 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
           if (_previewBytes != null)
             Image.memory(_previewBytes!, fit: BoxFit.cover),
           const ColoredBox(color: Color(0xAA000000)),
-          const Center(
+          Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                CircularProgressIndicator(color: kBrandPurpleLight),
-                SizedBox(height: 16),
+                const CircularProgressIndicator(color: kBrandPurpleLight),
+                const SizedBox(height: 16),
                 Text(
-                  'Analyzing foods…',
+                  _lookingCloser
+                      ? 'Looking closer at each part…'
+                      : 'Analyzing foods…',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 22,

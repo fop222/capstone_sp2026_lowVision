@@ -185,10 +185,53 @@ const String kDiningParseError =
 /// Parses and validates a VLM dining answer. Invalid entries are dropped.
 /// Allergen and dietary claims are re-labeled before anything is shown.
 DiningParseResult parseDiningResponse(String raw) {
-  final extracted = _extractJsonObject(raw);
-  if (extracted == null) {
+  final entries = _entriesFromRaw(raw);
+  if (entries == null) {
     return const DiningParseResult(foods: [], error: kDiningParseError);
   }
+  return _resultFromEntries(entries);
+}
+
+/// Left, center, and right strips of one photo, as sent by the scan screen
+/// when the full photo looped. Each strip's model location keeps its row
+/// word; the column comes from the strip itself, which is more reliable
+/// than the small model's own left/right guess.
+DiningParseResult parseDiningStrips(
+  List<({String column, String raw})> strips,
+) {
+  final entries = <Map<String, dynamic>>[];
+  for (final strip in strips) {
+    for (final entry in _entriesFromRaw(strip.raw) ?? const []) {
+      final row = RegExp(
+        r'top|middle|bottom',
+      ).firstMatch(_stringValue(entry['location']).toLowerCase())?.group(0);
+      entries.add({...entry, 'location': '${row ?? 'middle'} ${strip.column}'});
+    }
+  }
+  return _resultFromEntries(entries);
+}
+
+/// True when the model counted several foods but named only a few, i.e. it
+/// repeated one entry instead of describing each pan. A closer look at
+/// smaller parts of the photo usually breaks the loop.
+bool diningAnswerLooped(String raw) {
+  final entries = _entriesFromRaw(raw) ?? const [];
+  final counted =
+      int.tryParse(
+        RegExp(r'"count"\s*:\s*(\d+)').firstMatch(raw)?.group(1) ?? '',
+      ) ??
+      0;
+  final written = counted > entries.length ? counted : entries.length;
+  final names = entries
+      .map((e) => _stringValue(e['dish_name']).toLowerCase().trim())
+      .where((n) => n.isNotEmpty)
+      .toSet();
+  return written >= 4 && names.length * 2 < written;
+}
+
+List<Map<String, dynamic>>? _entriesFromRaw(String raw) {
+  final extracted = _extractJsonObject(raw);
+  if (extracted == null) return null;
 
   Object? decoded;
   try {
@@ -197,22 +240,20 @@ DiningParseResult parseDiningResponse(String raw) {
     // A token limit can cut the answer off mid-food. Keep the foods that
     // finished instead of failing the whole scan.
     decoded = _completeFoodObjects(raw);
-    if (decoded == null) {
-      return const DiningParseResult(foods: [], error: kDiningParseError);
-    }
+    if (decoded == null) return null;
   }
+  return _foodEntries(decoded);
+}
 
-  final entries = _foodEntries(decoded);
-  if (entries == null) {
-    return const DiningParseResult(foods: [], error: kDiningParseError);
-  }
+DiningParseResult _resultFromEntries(List<Map<String, dynamic>> entries) {
+  final cleaned = _withoutFakeSigns(entries);
 
   // The small VLM often loops, repeating one food until the token limit.
   // A repeated name is far more likely a loop than a second pan, so keep
   // only the first of each.
   final foods = <DiningFood>[];
   final seenNames = <String>{};
-  for (final entry in entries) {
+  for (final entry in cleaned) {
     final food = _foodFromMap(entry);
     if (food == null) continue;
     if (seenNames.add(food.dishName.toLowerCase().trim())) foods.add(food);
@@ -223,6 +264,55 @@ DiningParseResult parseDiningResponse(String raw) {
     return const DiningParseResult(foods: [], error: kDiningParseError);
   }
   return DiningParseResult(foods: sorted);
+}
+
+/// Clears sign_text the model did not actually read off a dish label:
+/// - the same text on two or more different foods is a section or station
+///   sign ("SALAD BAR", "Ask staff about allergens"), not a dish label;
+/// - on a visual estimate, sign text that just repeats the dish name is the
+///   model echoing its own guess ("pepper" / sign "pepper").
+List<Map<String, dynamic>> _withoutFakeSigns(
+  List<Map<String, dynamic>> entries,
+) {
+  final dishesPerSign = <String, Set<String>>{};
+  for (final entry in entries) {
+    final sign = _signKey(_stringValue(entry['sign_text']));
+    if (sign.isEmpty) continue;
+    dishesPerSign
+        .putIfAbsent(sign, () => <String>{})
+        .add(_signKey(_stringValue(entry['dish_name'])));
+  }
+
+  return [
+    for (final entry in entries)
+      if (_isFakeSign(entry, dishesPerSign))
+        {...entry, 'sign_text': ''}
+      else
+        entry,
+  ];
+}
+
+bool _isFakeSign(
+  Map<String, dynamic> entry,
+  Map<String, Set<String>> dishesPerSign,
+) {
+  final sign = _signKey(_stringValue(entry['sign_text']));
+  if (sign.isEmpty) return false;
+  if ((dishesPerSign[sign]?.length ?? 0) > 1) return true;
+
+  final claimsSign = _stringValue(
+    entry['information_source'],
+  ).toLowerCase().contains('sign');
+  if (claimsSign) return false;
+  final dish = _signKey(_stringValue(entry['dish_name']));
+  return dish.isNotEmpty && (dish.contains(sign) || sign.contains(dish));
+}
+
+/// Lowercase letters and digits only, with a plural "s" dropped, so
+/// "Buns" and "bun" compare equal.
+String _signKey(String text) {
+  final key = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9À-￿]'), '');
+  return key.endsWith('s') ? key.substring(0, key.length - 1) : key;
 }
 
 List<DiningFood> sortDiningFoods(List<DiningFood> foods) {
@@ -352,10 +442,15 @@ String spokenDiningFood(DiningFood food) {
     buffer.write(' Allergens could not be confirmed.');
   }
 
-  for (final notice in food.notices) {
-    buffer.write(' $notice');
-  }
+  buffer.write(' $kPleaseConfirmWithStaff');
   return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+/// Name and location only, for the results list. Details are spoken on the
+/// food's own screen.
+String spokenDiningFoodBrief(DiningFood food) {
+  if (food.location.isEmpty) return '${food.dishName}.';
+  return '${food.dishName}, ${food.location}.';
 }
 
 String spokenDiningFoods(List<DiningFood> foods) {
@@ -365,8 +460,9 @@ String spokenDiningFoods(List<DiningFood> foods) {
   final count = foods.length == 1 ? '1 food' : '${foods.length} foods';
   final parts = <String>['Lumio found $count.'];
   for (var i = 0; i < foods.length; i++) {
-    parts.add('Food ${i + 1}. ${spokenDiningFood(foods[i])}');
+    parts.add('Food ${i + 1}. ${spokenDiningFoodBrief(foods[i])}');
   }
+  parts.add('Tap a food for allergens and dietary details.');
   return parts.join(' ');
 }
 

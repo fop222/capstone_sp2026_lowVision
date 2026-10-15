@@ -69,6 +69,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                 children: [
                   Semantics(
                     header: true,
+                    liveRegion: true,
                     child: Text(
                       count,
                       style: theme.textTheme.headlineMedium?.copyWith(
@@ -79,10 +80,11 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Foods are listed from the top of the photo to the bottom. Tap one for details.',
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: Colors.white70,
-                      height: 1.35,
+                    'Foods are listed from the top of the photo to the bottom. Tap a food for allergens and dietary details.',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      height: 1.4,
                     ),
                   ),
                   if (widget.photoBytes != null) ...[
@@ -105,6 +107,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                   Semantics(
                     button: true,
                     label: 'Hear all foods',
+                    excludeSemantics: true,
                     child: GroceryGlowButton(
                       onPressed: () => _speak(spokenDiningFoods(_foods)),
                       child: const Row(
@@ -121,6 +124,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                   for (var i = 0; i < _foods.length; i++) ...[
                     _DiningFoodCard(
                       index: i + 1,
+                      total: _foods.length,
                       food: _foods[i],
                       onTap: () => _openFood(_foods[i]),
                     ),
@@ -129,6 +133,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                   Semantics(
                     button: true,
                     label: 'Scan another photo',
+                    excludeSemantics: true,
                     child: OutlinedButton(
                       onPressed: () => Navigator.of(context).pop(),
                       style: OutlinedButton.styleFrom(
@@ -221,6 +226,7 @@ class _DiningFoodDetailScreenState extends State<DiningFoodDetailScreen> {
                   Semantics(
                     button: true,
                     label: 'Hear this food',
+                    excludeSemantics: true,
                     child: GroceryGlowButton(
                       onPressed: _speak,
                       child: const Row(
@@ -246,21 +252,24 @@ class _DiningFoodDetailScreenState extends State<DiningFoodDetailScreen> {
 class _DiningFoodCard extends StatelessWidget {
   const _DiningFoodCard({
     required this.index,
+    required this.total,
     required this.food,
     required this.onTap,
   });
 
   final int index;
+  final int total;
   final DiningFood food;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Semantics(
         button: true,
-        label: 'Food $index. ${spokenDiningFood(food)}',
+        label: 'Food $index of $total. ${spokenDiningFoodBrief(food)}',
+        hint: 'Opens allergens and dietary details',
         excludeSemantics: true,
         child: Material(
           color: Colors.transparent,
@@ -268,32 +277,38 @@ class _DiningFoodCard extends StatelessWidget {
             onTap: onTap,
             borderRadius: BorderRadius.circular(20),
             child: GroceryListCardShell(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '$index. ${food.dishName}',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 72),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$index. ${food.dishName}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              height: 1.25,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
-                      ),
-                      const Icon(
-                        Icons.chevron_right_rounded,
-                        color: Colors.white,
-                        size: 32,
-                      ),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                      ],
+                    ),
+                    if (food.location.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _FactLine(label: 'Location', value: food.locationLabel),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  DiningFoodFacts(food: food),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -337,25 +352,22 @@ class DiningFoodFacts extends StatelessWidget {
             'Sign says: ${food.signText}',
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 20,
+              fontSize: 22,
               height: 1.35,
               fontWeight: FontWeight.w600,
             ),
           ),
         ],
-        const SizedBox(height: 12),
-        for (final notice in food.notices) ...[
-          Text(
-            notice,
-            style: const TextStyle(
-              color: Color(0xFFFFE2D6),
-              fontSize: 18,
-              height: 1.35,
-              fontWeight: FontWeight.w600,
-            ),
+        const SizedBox(height: 16),
+        const Text(
+          kPleaseConfirmWithStaff,
+          style: TextStyle(
+            color: Color(0xFFFFE2D6),
+            fontSize: 20,
+            height: 1.35,
+            fontWeight: FontWeight.w600,
           ),
-          const SizedBox(height: 8),
-        ],
+        ),
       ],
     );
   }
@@ -375,8 +387,8 @@ class _FactLine extends StatelessWidget {
           TextSpan(
             text: '$label: ',
             style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 18,
+              color: Color(0xFFE0E0E0),
+              fontSize: 20,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -384,7 +396,7 @@ class _FactLine extends StatelessWidget {
             text: value,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 20,
+              fontSize: 24,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -413,8 +425,8 @@ class _ClaimSection extends StatelessWidget {
         Text(
           title,
           style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 18,
+            color: Color(0xFFE0E0E0),
+            fontSize: 20,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -424,7 +436,7 @@ class _ClaimSection extends StatelessWidget {
             'Unknown',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 20,
+              fontSize: 24,
               fontWeight: FontWeight.w700,
             ),
           )
