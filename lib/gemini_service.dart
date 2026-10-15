@@ -384,21 +384,46 @@ String _asString(dynamic value) {
 // ── Screenshot → Recipe extraction ───────────────────────────────────────────
 //
 // Pipeline (fast, reliable):
-//   1. OCR every image via the Magic server /extract-text  (~5 s each)
-//   2. Combine the extracted text
-//   3. Send text-only to Gemini for structured recipe parsing  (~5–10 s)
+//   1. OCR every image via the Magic server /extract-text
+//   2. Parse the recipe locally from that text
 //
-// This avoids sending large base64-encoded images to Gemini Vision,
-// which could hang for 20+ minutes cycling through model retries.
-// The Magic server does NOT need any changes — /extract-text already exists.
+// The server returns {"full_text": "...", "lines": [...]}. No Magic server
+// changes are required.
 
-/// OCRs [imageBytesList] via the Flask `/extract-text` endpoint and returns
-/// the combined text from all images (each separated by a blank line).
+/// Pulls OCR text from a Magic `/extract-text` JSON body.
 ///
-/// Individual image failures are silently skipped so partial results are
-/// still usable when one screenshot is blurry or unsupported.
-Future<String> _ocrImages(List<Uint8List> imageBytesList) async {
+/// The server sends `full_text` (and `lines`). `text` is only a fallback.
+String _textFromOcrResponse(Map<String, dynamic> map) {
+  String usable(String? value) {
+    final t = (value ?? '').trim();
+    if (t.isEmpty || t.toLowerCase() == 'no text found') return '';
+    return t;
+  }
+
+  final full = usable(map['full_text'] as String?);
+  if (full.isNotEmpty) return full;
+
+  final lines = map['lines'];
+  if (lines is List) {
+    final joined = lines
+        .map((e) => e.toString().trim())
+        .where((s) => s.isNotEmpty)
+        .join('\n');
+    final fromLines = usable(joined);
+    if (fromLines.isNotEmpty) return fromLines;
+  }
+
+  return usable(map['text'] as String?);
+}
+
+/// OCRs [imageBytesList] via the Flask `/extract-text` endpoint.
+///
+/// Returns the combined text, or an error string when every image failed.
+Future<(String text, String? error)> _ocrImages(
+  List<Uint8List> imageBytesList,
+) async {
   final parts = <String>[];
+  final errors = <String>[];
   for (int i = 0; i < imageBytesList.length; i++) {
     try {
       final req = http.MultipartRequest('POST', ocrMultipartUri())
@@ -408,18 +433,34 @@ Future<String> _ocrImages(List<Uint8List> imageBytesList) async {
           filename: 'screenshot_$i.jpg',
         ));
       final streamed =
-          await req.send().timeout(const Duration(seconds: 20));
+          await req.send().timeout(const Duration(seconds: 50));
       final body = await streamed.stream.bytesToString();
       if (streamed.statusCode == 200) {
         final map = jsonDecode(body) as Map<String, dynamic>;
-        final text = (map['text'] as String? ?? '').trim();
-        if (text.isNotEmpty) parts.add(text);
+        final text = _textFromOcrResponse(map);
+        if (text.isNotEmpty) {
+          parts.add(text);
+        } else {
+          errors.add('No readable text in screenshot ${i + 1}.');
+        }
+      } else {
+        var detail = body.trim().replaceAll(RegExp(r'\s+'), ' ');
+        if (detail.length > 160) detail = '${detail.substring(0, 160)}…';
+        errors.add(
+          detail.isEmpty
+              ? 'OCR server error ${streamed.statusCode}.'
+              : 'OCR server error ${streamed.statusCode}: $detail',
+        );
       }
     } catch (e) {
       debugPrint('[screenshot-ocr] image $i failed: $e');
+      errors.add('Could not reach the OCR server.');
     }
   }
-  return parts.join('\n\n');
+  if (parts.isEmpty) {
+    return ('', errors.isEmpty ? 'No readable text in the image.' : errors.first);
+  }
+  return (parts.join('\n\n'), null);
 }
 
 /// Parses a recipe from raw OCR text using heuristic rules.
@@ -618,9 +659,10 @@ Recipe? _parseOcrRecipe(String rawText) {
       r'grams?|g|kg|ml|liters?|l|cans?|bunches?|cloves?|slices?|pieces?|'
       r'packages?|pkg|bags?|boxes?|sticks?|sprigs?|pinch|to taste|as needed';
   final re = RegExp(
-      r'^([\d\.\-\u00bc\u00bd\u00be\u2153\u2154\u215b\u215c\u215d\u215e'
-      r'\/\s]+(?:$units)?)\s+(.*)',
-      caseSensitive: false);
+    '^([\\d.\\-\u00bc\u00bd\u00be\u2153\u2154\u215b\u215c\u215d\u215e/\\s]+'
+    '(?:$units)?)\\s+(.*)',
+    caseSensitive: false,
+  );
   final m = re.firstMatch(text);
   if (m != null) return (m.group(1)!.trim(), m.group(2)!.trim());
   // Leading number only ("3 eggs")
@@ -644,13 +686,19 @@ Future<Recipe?> extractRecipeFromScreenshots(
   //           the shelf/pantry scanner — no changes needed on the server).
   final n = imageBytesList.length;
   onProgress?.call('Reading $n screenshot${n == 1 ? '' : 's'}…');
-  final ocrText = await _ocrImages(imageBytesList);
+  final ocr = await _ocrImages(imageBytesList);
+  final ocrText = ocr.$1;
   debugPrint('[screenshot] OCR text length: ${ocrText.length}');
-  debugPrint('[screenshot] OCR text preview: ${ocrText.substring(0, ocrText.length.clamp(0, 300))}');
+  if (ocrText.isNotEmpty) {
+    debugPrint(
+      '[screenshot] OCR text preview: '
+      '${ocrText.substring(0, ocrText.length.clamp(0, 300))}',
+    );
+  }
 
   if (ocrText.trim().isEmpty) {
-    debugPrint('[screenshot] OCR returned no text — server may be unreachable.');
-    onProgress?.call('⚠ Could not read text from image (server unreachable?)');
+    debugPrint('[screenshot] OCR failed: ${ocr.$2}');
+    onProgress?.call('⚠ ${ocr.$2 ?? 'Could not read text from the image.'}');
     return null;
   }
 
