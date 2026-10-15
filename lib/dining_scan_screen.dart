@@ -317,18 +317,23 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Whole-room shots make the model guess at food it cannot see;
+          // pans that fill the frame are named far more accurately.
           const Text(
-            'Include the foods and any signs in the frame.',
+            'Stand at the counter so the food fills the photo. Include any signs.',
             style: TextStyle(color: Colors.white, fontSize: 20, height: 1.3),
           ),
           if (_statusError != null) ...[
             const SizedBox(height: 10),
-            Text(
-              _statusError!,
-              style: const TextStyle(
-                color: Color(0xFFFF8C5A),
-                fontSize: 18,
-                height: 1.3,
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                _statusError!,
+                style: const TextStyle(
+                  color: Color(0xFFFF8C5A),
+                  fontSize: 20,
+                  height: 1.3,
+                ),
               ),
             ),
           ],
