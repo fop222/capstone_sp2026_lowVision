@@ -19,9 +19,17 @@ List<CameraDescription> backCamerasOnly(List<CameraDescription> all) {
       .toList();
 }
 
+/// Never throws: a denied permission or missing camera would otherwise stop
+/// [main] before runApp and leave the web app blank. Screens already handle
+/// an empty list, and Upload Image flows still work.
 Future<void> initCameras() async {
-  final all = await availableCameras();
-  cameras = backCamerasOnly(all);
+  try {
+    final all = await availableCameras();
+    cameras = backCamerasOnly(all);
+  } catch (e) {
+    debugPrint('initCameras failed, continuing without camera: $e');
+    cameras = <CameraDescription>[];
+  }
 }
 
 /// Single camera screen for both web and mobile: live camera preview + capture button.

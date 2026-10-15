@@ -280,6 +280,24 @@ void main() {
       expect(parseDiningResponse('').error, kDiningParseError);
     });
 
+    test('answer cut off by the token limit keeps the finished foods', () {
+      final result = parseDiningResponse(
+        '{"foods":[{"dish_name":"Roast potatoes","location":"bottom left",'
+        '"confidence":"medium","sign_text":"","allergens":[],'
+        '"dietary_preferences":[],"information_source":"visual estimate",'
+        '"warning":"Say \\"ask staff\\" {first}"},'
+        '{"dish_name":"Meatballs","location":"bottom center",'
+        '"confidence":"medium","sign_text":"","allergens":[],'
+        '"dietary_preferences":[],"information_source":"visual estimate",'
+        '"warning":""},{"dish_name":"',
+      );
+      expect(result.isValid, isTrue);
+      expect(result.foods.map((f) => f.dishName), [
+        'Roast potatoes',
+        'Meatballs',
+      ]);
+    });
+
     test('different camera angles still map onto the nine locations', () {
       expect(normalizeDiningLocation('upper left'), 'top left');
       expect(normalizeDiningLocation('centre'), 'middle center');

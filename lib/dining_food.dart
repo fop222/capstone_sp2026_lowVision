@@ -185,7 +185,12 @@ DiningParseResult parseDiningResponse(String raw) {
   try {
     decoded = jsonDecode(extracted);
   } catch (_) {
-    return const DiningParseResult(foods: [], error: kDiningParseError);
+    // A token limit can cut the answer off mid-food. Keep the foods that
+    // finished instead of failing the whole scan.
+    decoded = _completeFoodObjects(raw);
+    if (decoded == null) {
+      return const DiningParseResult(foods: [], error: kDiningParseError);
+    }
   }
 
   final entries = _foodEntries(decoded);
@@ -410,6 +415,48 @@ int _firstIndex(int a, int b) {
   if (a < 0) return b;
   if (b < 0) return a;
   return a < b ? a : b;
+}
+
+/// Returns every fully closed `{...}` object inside the first JSON array of
+/// [raw], or null if none closed. Used when the answer was truncated.
+List<Object?>? _completeFoodObjects(String raw) {
+  final arrayStart = raw.indexOf('[');
+  if (arrayStart < 0) return null;
+  final foods = <Object?>[];
+  var depth = 0;
+  var objectStart = -1;
+  var inString = false;
+  var escaped = false;
+  for (var i = arrayStart + 1; i < raw.length; i++) {
+    final c = raw[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (c == r'\') {
+        escaped = true;
+      } else if (c == '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      inString = true;
+    } else if (c == '{') {
+      if (depth == 0) objectStart = i;
+      depth++;
+    } else if (c == '}') {
+      depth--;
+      if (depth == 0 && objectStart >= 0) {
+        try {
+          foods.add(jsonDecode(raw.substring(objectStart, i + 1)));
+        } catch (_) {}
+        objectStart = -1;
+      }
+    } else if (c == ']' && depth == 0) {
+      break;
+    }
+  }
+  return foods.isEmpty ? null : foods;
 }
 
 List<Map<String, dynamic>>? _foodEntries(Object? decoded) {
