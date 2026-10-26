@@ -346,10 +346,11 @@ class DiningFoodFacts extends StatelessWidget {
           label: 'Confidence',
           value: '${food.confidenceLabel} · ${food.sourceLabel}',
         ),
-        if (food.signText.isNotEmpty) ...[
+        // Just the dish name, never the raw OCR text of the card.
+        if (food.informationSource == DiningInfoSource.sign) ...[
           const SizedBox(height: 12),
           Text(
-            'Sign says: ${food.signText}',
+            'Sign says: ${food.dishName}',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 22,

@@ -511,6 +511,45 @@ void main() {
       );
     });
 
+    test('a card read off the wrong tray gives way to the food in it', () {
+      final food = parseDiningResponse(
+        jsonEncode({
+          'foods': [
+            {
+              ...item(
+                'Steamed Baked Salmon',
+                'to your right',
+                'Steamed Baked Salmon',
+              ),
+              'visible_food': 'green broccoli florets',
+            },
+            {
+              ...item(
+                'Grilled Atlantic Salmon',
+                'to your left',
+                'Grilled Atlantic Salmon (GF)',
+              ),
+              'visible_food': 'grilled salmon fillet',
+              'dietary_preferences': ['GF'],
+            },
+          ],
+        }),
+        requireEvidence: true,
+      ).foods;
+      final byName = {for (final f in food) f.dishName: f};
+      expect(
+        byName.keys,
+        containsAll(['green broccoli florets', 'Grilled Atlantic Salmon']),
+      );
+      expect(byName['green broccoli florets']!.signText, isEmpty);
+      expect(
+        byName['Grilled Atlantic Salmon']!.dietaryPreferences.map(
+          (c) => c.chipLabel,
+        ),
+        ['Gluten-Free'],
+      );
+    });
+
     test('any repeat in a long list asks for a closer look', () {
       // Dessert case: 7 written, 4 distinct names.
       const dessert =

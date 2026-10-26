@@ -52,8 +52,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Hear this food'), findsOneWidget);
-    expect(find.text('Dairy · Confirmed'), findsOneWidget);
-    expect(find.text('Vegetarian · Confirmed'), findsOneWidget);
+    expect(find.text('Dairy'), findsOneWidget);
+    expect(find.text('Vegetarian'), findsOneWidget);
     expect(find.textContaining('Sign says: Vegetable Lasagna'), findsOneWidget);
     expect(find.text('Location: Closest to you on your left'), findsOneWidget);
     expect(find.textContaining('Confidence'), findsOneWidget);
@@ -72,7 +72,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: DiningFoodDetailScreen(food: parsed.foods.single)),
     );
-    expect(find.text('Possible Nuts · Estimated'), findsNothing);
+    expect(find.text('Possible Nuts'), findsNothing);
     expect(find.text('Allergens'), findsOneWidget);
     expect(find.text('Dietary preferences'), findsOneWidget);
     expect(find.textContaining('Confidence'), findsOneWidget);

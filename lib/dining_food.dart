@@ -37,11 +37,12 @@ Count only clearly visible, prominent foods and readable drink options. Describe
 Read each nearby dish or drink label carefully. Use a readable label's exact dish name rather than a generic guess. Recheck letters affected by glare; do not complete unreadable words or autocorrect a brand or dish from memory. Without a readable label, use a short visual estimate of the main food and its color. Do not invent exact ingredients, flavors, seasonings, or hidden fillings. Prefer a broad supported name over a specific guess.
 
 Return ONLY compact JSON on one line, no other text:
-{"count":0,"foods":[{"item_id":"1","dish_name":"...","location":"...","sign_text":"","information_source":"visual estimate","confidence":"medium","identification_confidence":0.9,"clearly_visible":true}]}
+{"count":0,"foods":[{"item_id":"1","visible_food":"...","dish_name":"...","location":"...","sign_text":"","information_source":"visual estimate","confidence":"medium","identification_confidence":0.9,"clearly_visible":true}]}
 
 Rules:
 - foods has exactly "count" objects, one per pan, bowl, or portion, then the JSON ends.
 - No two objects have the same dish_name.
+- visible_food is 2 to 5 words for what is actually in that tray (main food and color), judged from the food itself, never from a sign. Write it before dish_name.
 - item_id identifies one physical tray, pan, or drink option. Give each tray one name only: never list a general name and a more specific name for the same tray, and never list the same kind of food twice. Different varieties on different trays stay separate.
 - identification_confidence is a number from 0 to 1 for the name you give. List every tray of food you can clearly see; omit only items you cannot make out. The user can take a closer photo.
 - location describes distance from the viewer, never image coordinates. When perspective clearly shows depth, use: closest to you on your left, closest to you, closest to you on your right, farther from you on your left, farther from you, farther from you on your right, furthest from you on your left, furthest from you, or furthest from you on your right.
@@ -89,16 +90,18 @@ class DiningClaim {
     }
   }
 
-  /// Text label includes the certainty word so color is never the only signal.
+  /// A confirmed claim is just its label ("Gluten-Free"). An estimate
+  /// starts with "Possible", so color is never the only signal.
   String get chipLabel {
     if (certainty == DiningCertainty.estimated) {
       final softened = label.replaceFirst(
         RegExp(r'^possibly\s+', caseSensitive: false),
         '',
       );
-      return 'Possible $softened · Estimated';
+      return 'Possible $softened';
     }
-    return '$label · $certaintyLabel';
+    if (certainty == DiningCertainty.unknown) return '$label (unknown)';
+    return label;
   }
 }
 
@@ -461,8 +464,9 @@ DiningParseResult _resultFromEntries(
     for (final entry in entries)
       if (!mergeKinds)
         entry
-      else if (!_isUnreadableLabel(entry))
-        _withoutNoiseSign(entry),
+      else if (_withCardSignOnly(entry) case final card?
+          when !_isUnreadableLabel(card))
+        _withVisibleFood(_withoutNoiseSign(card)),
   ]);
 
   // The small VLM often loops, repeating one food until the token limit.
@@ -857,6 +861,90 @@ Map<String, dynamic> _withoutNoiseSign(Map<String, dynamic> entry) {
   };
 }
 
+/// A card read off the wrong tray ("Steamed Baked Salmon" over a pan of
+/// broccoli) names a different food than the model sees in the pan. When
+/// the names share no food word, trust the food: use visible_food as an
+/// estimate and drop the sign. visible_food is never shown otherwise.
+/// How a food is cooked or described; never enough to say two names agree.
+const _cookingWords = {
+  'roasted',
+  'grilled',
+  'fried',
+  'baked',
+  'steamed',
+  'mashed',
+  'creamy',
+  'fresh',
+  'sweet',
+  'spicy',
+  'sour',
+  'green',
+  'stir',
+};
+
+bool _isFoodNoun(String w) =>
+    _foodWords.contains(w) && !_cookingWords.contains(w);
+
+Map<String, dynamic> _withVisibleFood(Map<String, dynamic> entry) {
+  final seen = _nameWords(
+    _stringValue(entry['visible_food']),
+  ).where(_isFoodNoun).toSet();
+  final named = _nameWords(
+    _stringValue(entry['dish_name']),
+  ).where(_isFoodNoun).toSet();
+  if (seen.isEmpty || named.isEmpty || seen.any(named.contains)) return entry;
+  return {
+    ...entry,
+    'dish_name': _stringValue(entry['visible_food']).trim(),
+    'sign_text': '',
+    'information_source': 'visual estimate',
+    'dietary_preferences': const <String>[],
+    'allergens': const <String>[],
+  };
+}
+
+/// Lines from an over-arching banner ("ALLERGEN INFORMATION / Please read
+/// the ingredient information for each menu item"), never one dish's card.
+final _bannerLine = RegExp(
+  r'allergen information|please read|ingredient information|'
+  r'for each (menu )?item|menu item|nutrition information',
+  caseSensitive: false,
+);
+
+/// Keeps only one dish's own card. OCR of a station with a big allergen
+/// banner returned every card and the banner as one sign, which pinned the
+/// banner's allergen list (Fish, Shellfish, Milk, Soy...) onto the salmon as
+/// "confirmed" and became names like "A M Chee Creamy and Atlantic
+/// Grilled". Returns null when nothing usable is left.
+Map<String, dynamic>? _withCardSignOnly(Map<String, dynamic> entry) {
+  final lines = _stringValue(entry['sign_text'])
+      .split(RegExp(r'[\n;|]'))
+      .map((l) => l.trim())
+      .where((l) => l.isNotEmpty && !_bannerLine.hasMatch(l))
+      .toList();
+  final signWords = lines
+      .join(' ')
+      .split(RegExp(r's+'))
+      .where((w) => w.isNotEmpty);
+  final sign = lines.length > 6 || signWords.length > 20
+      ? ''
+      : lines.join('\n');
+
+  var dish = _stringValue(entry['dish_name']).trim();
+  final dishWords = dish.split(RegExp(r's+')).where((w) => w.isNotEmpty).length;
+  if (_bannerLine.hasMatch(dish) || dishWords > 7) {
+    dish = _stringValue(entry['visible_food']).trim();
+    if (dish.isEmpty) return null;
+  }
+  final wasSign = _stringValue(entry['information_source']).contains('sign');
+  return {
+    ...entry,
+    'dish_name': dish,
+    'sign_text': sign,
+    if (wasSign && sign.isEmpty) 'information_source': 'visual estimate',
+  };
+}
+
 /// Lowercase words of a dish name, with a plural "s" dropped.
 List<String> _nameWords(String name) => [
   for (final w in name.toLowerCase().split(RegExp(r'[^a-z0-9À-￿]+')))
@@ -1002,8 +1090,8 @@ String spokenDiningFood(DiningFood food) {
     ..write(food.dishName)
     ..write(food.location.isEmpty ? '.' : ' is located ${food.location}.');
 
-  if (food.signText.isNotEmpty) {
-    buffer.write(' The sign says ${food.signText}.');
+  if (food.informationSource == DiningInfoSource.sign) {
+    buffer.write(' The sign says ${food.dishName}.');
   }
 
   if (food.confidence != 'high' ||
@@ -1436,6 +1524,13 @@ bool _isAllergenList(String text) {
 /// Separate metadata without deleting ingredient names such as Fish Tacos or
 /// Milk Chocolate. Bare allergens are metadata only in a separate segment.
 String _cleanDishTitle(String text) {
+  // A card reads "Name / Ingredients: ... / Contains: ..."; the name is
+  // everything before the first ingredients or contains line.
+  final cut = RegExp(
+    r'[\s,(]*\b(ingredients?|contains)\b\s*:',
+    caseSensitive: false,
+  ).firstMatch(text);
+  if (cut != null && cut.start > 0) text = text.substring(0, cut.start);
   var title = text.replaceAllMapped(RegExp(r'\(([^)]*)\)|\[([^\]]*)\]'), (m) {
     final inner = m.group(1) ?? m.group(2) ?? '';
     final withoutDiet = inner.replaceAll(
