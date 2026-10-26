@@ -16,6 +16,65 @@ DiningParseResult scan(List<Map<String, Object?>> entries) =>
     parseDiningResponse(jsonEncode({'foods': entries}), requireEvidence: true);
 
 void main() {
+  test(
+    'dietary tags leave the title; only declared allergens are retained',
+    () {
+      final result = scan([
+        {
+          ...item('Vegan GF Curry - Contains Soy'),
+          'sign_text': 'Vegan GF Curry - Contains Soy',
+          'information_source': 'sign',
+          'allergens': ['Dairy'],
+        },
+      ]);
+      final food = result.foods.single;
+      expect(food.dishName, 'Curry');
+      expect(
+        food.dietaryPreferences.map((c) => c.label),
+        containsAll(['Vegan', 'Gluten-Free']),
+      );
+      expect(food.allergens.map((c) => c.label), ['Soy']);
+    },
+  );
+
+  test('ingredient names alone do not declare allergens', () {
+    final result = scan([
+      {
+        ...item('Milk Chocolate'),
+        'sign_text': 'Milk Chocolate',
+        'information_source': 'sign',
+        'allergens': ['Dairy'],
+      },
+      {
+        ...item('Fish Tacos'),
+        'sign_text': 'Fish Tacos',
+        'information_source': 'sign',
+        'allergens': ['Fish', 'Wheat'],
+      },
+    ]);
+    expect(result.foods.map((f) => f.dishName), [
+      'Milk Chocolate',
+      'Fish Tacos',
+    ]);
+    expect(result.foods.every((f) => f.allergens.isEmpty), isTrue);
+  });
+
+  test('allergen declarations preserve may-contain wording and nut types', () {
+    final food = scan([
+      {
+        ...item('Cookies'),
+        'sign_text':
+            'Cookies - Contains Peanuts, Tree Nuts, Mustard; May contain Sesame',
+        'information_source': 'sign',
+      },
+    ]).foods.single;
+    expect(food.dishName, 'Cookies');
+    expect(
+      food.allergens.map((c) => c.label),
+      containsAll(['Peanuts', 'Tree Nuts', 'Mustard', 'May contain Sesame']),
+    );
+  });
+
   test('drink labels are accepted and repeated options are deduplicated', () {
     final result = scan([
       {...item('Water'), 'sign_text': 'Water', 'information_source': 'sign'},

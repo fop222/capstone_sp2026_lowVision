@@ -48,6 +48,7 @@ Rules:
 - Items in the same row share the same row word. Use left or right alone if depth or row is unclear; never invent different rows for a single row of pans.
 - sign_text is only text you can actually read on a sign or label in the photo; otherwise "".
 - information_source is "sign" with confidence "high" only when you read the dish name on a sign; then add "allergens" and "dietary_preferences" lists with only the words on the sign.
+- dish_name contains only the dish name, never dietary tags or allergen declarations. Put Vegetarian/Veg, Vegan, Pescatarian, Gluten-Free/GF, Dairy-Free, Keto, Low-Carb, Low-Sodium, Halal, and Kosher in dietary_preferences. Put explicitly printed allergen declarations in allergens. If the sign does not state allergens, return an empty allergens list; do not infer allergens from the dish name or appearance.
 - Otherwise information_source is "visual estimate" with confidence "medium" or "low". Do not invent exact ingredients.
 - Use "Unidentified food" only when a food cannot be described at all.''';
 
@@ -465,7 +466,7 @@ String spokenDiningFood(DiningFood food) {
 
   if (confirmedAllergens.isNotEmpty) {
     buffer.write(
-      ' The sign identifies it as containing ${_joinAnd(confirmedAllergens)}.',
+      ' Allergen information on the sign: ${_joinAnd(confirmedAllergens)}.',
     );
   }
   if (estimatedAllergens.isNotEmpty) {
@@ -663,6 +664,8 @@ DiningFood? _foodFromMap(Map<String, dynamic> map) {
     final signedName = _dishNameFromSign(signText);
     if (signedName != null) dish = signedName;
   }
+  dish = _cleanDishTitle(dish);
+  if (dish.isEmpty) return null;
 
   var confidence = _confidenceValue(_stringValue(map['confidence']));
   if (source != DiningInfoSource.sign && confidence == 'high') {
@@ -672,7 +675,24 @@ DiningFood? _foodFromMap(Map<String, dynamic> map) {
   if (signPartial && confidence == 'high') confidence = 'medium';
 
   final dietaryValues = _stringList(map['dietary_preferences']);
+  dietaryValues.addAll(
+    _dietaryAliases.keys.where(
+      (label) => _signSupportsDietary(_stringValue(map['dish_name']), label),
+    ),
+  );
   final allergenValues = _stringList(map['allergens']);
+  if (source == DiningInfoSource.sign && !signPartial) {
+    dietaryValues.addAll(
+      _dietaryAliases.keys.where(
+        (label) => _signSupportsDietary(signText, label),
+      ),
+    );
+    allergenValues.addAll(
+      _allergenAliases.keys.where(
+        (label) => _signSupportsAllergen(signText, label),
+      ),
+    );
+  }
   for (final value in dietaryValues) {
     if (_canonicalDietary(value) == null && _canonicalAllergen(value) != null) {
       allergenValues.add(value);
@@ -680,12 +700,12 @@ DiningFood? _foodFromMap(Map<String, dynamic> map) {
   }
   final allergens = _allergenClaims(
     values: allergenValues,
-    signText: signText,
+    signText: signPartial ? '' : signText,
     source: source,
   );
   final dietary = _dietaryClaims(
     values: dietaryValues,
-    signText: signText,
+    signText: signPartial ? '' : signText,
     source: source,
   );
 
@@ -721,8 +741,9 @@ String _knownLocation(String raw) {
   final normalized = normalizeDiningLocation(raw);
   if (kDiningLocations.contains(normalized) ||
       normalized == 'left' ||
-      normalized == 'right')
+      normalized == 'right') {
     return normalized;
+  }
   return '';
 }
 
@@ -768,35 +789,21 @@ bool _signIsPartial(String signText, String warning) {
 }
 
 String? _dishNameFromSign(String signText) {
-  final parts = signText.split(RegExp(r'\s+[-–—|]\s+'));
-  if (parts.isEmpty) return null;
-  final first = parts.first.trim();
-  if (first.length < 3 || _isLabelOnly(first)) return null;
-  return first;
+  final name = _cleanDishTitle(signText);
+  return name.isEmpty || _isLabelOnly(name) ? null : name;
 }
 
 bool _isLabelOnly(String text) {
-  final lower = text.toLowerCase().trim();
-  const labels = {
-    'vegetarian',
-    'vegan',
-    'gluten-free',
-    'gluten free',
-    'halal',
-    'kosher',
-    'pescatarian',
-  };
-  return labels.contains(lower) || lower.startsWith('contains ');
+  return _cleanDishTitle(text).isEmpty;
 }
 
 const Map<String, List<String>> _allergenAliases = {
-  'Dairy': ['dairy', 'milk', 'cheese', 'lactose', 'butter', 'cream', 'whey'],
+  'Dairy': ['dairy', 'milk'],
   'Wheat': ['wheat', 'gluten'],
-  'Nuts': [
-    'nut',
-    'nuts',
-    'peanut',
-    'peanuts',
+  'Peanuts': ['peanut', 'peanuts'],
+  'Tree Nuts': [
+    'tree nut',
+    'tree nuts',
     'almond',
     'cashew',
     'walnut',
@@ -809,16 +816,94 @@ const Map<String, List<String>> _allergenAliases = {
   'Fish': ['fish', 'salmon', 'tuna'],
   'Shellfish': ['shellfish', 'shrimp', 'prawn', 'crab', 'lobster'],
   'Sesame': ['sesame'],
+  'Mustard': ['mustard'],
 };
 
 const Map<String, List<String>> _dietaryAliases = {
-  'Vegetarian': ['vegetarian'],
+  'Vegetarian': ['vegetarian', 'veg'],
   'Vegan': ['vegan'],
-  'Gluten-Free': ['gluten-free', 'gluten free', 'glutenfree'],
+  'Gluten-Free': ['gluten-free', 'gluten free', 'glutenfree', 'gf'],
+  'Dairy-Free': ['dairy-free', 'dairy free'],
+  'Keto': ['keto', 'ketogenic'],
+  'Low-Carb': ['low-carb', 'low carb', 'low carbohydrate'],
+  'Low-Sodium': ['low-sodium', 'low sodium'],
   'Halal': ['halal'],
   'Kosher': ['kosher'],
   'Pescatarian': ['pescatarian'],
 };
+
+final _allergenDeclaration = RegExp(
+  r'\b(?:(?:may\s+)?contains?|allergens?\s*:?)\s*:?\s*([^\n;|]+)',
+  caseSensitive: false,
+);
+
+RegExp _aliasPattern(Iterable<String> aliases) {
+  final sorted = aliases.toSet().toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  return RegExp(
+    '\\b(?:${sorted.map(RegExp.escape).join('|')})\\b',
+    caseSensitive: false,
+  );
+}
+
+bool _isAllergenList(String text) {
+  var remainder = text.replaceAll(
+    _aliasPattern(_allergenAliases.values.expand((aliases) => aliases)),
+    '',
+  );
+  if (remainder == text) return false;
+  remainder = remainder.replaceAll(
+    RegExp(r'\band\b', caseSensitive: false),
+    '',
+  );
+  return remainder.replaceAll(RegExp(r'[\s,;/()\[\]&.:\-]+'), '').isEmpty;
+}
+
+/// Separate metadata without deleting ingredient names such as Fish Tacos or
+/// Milk Chocolate. Bare allergens are metadata only in a separate segment.
+String _cleanDishTitle(String text) {
+  var title = text.replaceAllMapped(RegExp(r'\(([^)]*)\)|\[([^\]]*)\]'), (m) {
+    final inner = m.group(1) ?? m.group(2) ?? '';
+    final withoutDiet = inner.replaceAll(
+      _aliasPattern(_dietaryAliases.values.expand((aliases) => aliases)),
+      '',
+    );
+    return _isAllergenList(inner) ||
+            _allergenDeclaration.hasMatch(inner) ||
+            withoutDiet.replaceAll(RegExp(r'[\s,/;&]+'), '').isEmpty
+        ? ''
+        : m.group(0)!;
+  });
+  title = title.replaceAll(_allergenDeclaration, '');
+  title = title.replaceAll(
+    _aliasPattern(_dietaryAliases.values.expand((aliases) => aliases)),
+    '',
+  );
+  final parts = title.split(RegExp(r'\r?\n|\s+[–—-]\s+|[|;]'));
+  return parts
+      .where((part) => parts.length == 1 || !_isAllergenList(part.trim()))
+      .join(' ')
+      .replaceAll(RegExp(r'\(\s*\)|\[\s*\]'), '')
+      .replaceAll(RegExp(r'^[\s,/:;|–—-]+|[\s,/:;|–—-]+$'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+List<String> _allergenDeclarations(String text) {
+  final declarations = _allergenDeclaration
+      .allMatches(text)
+      .map((m) => m.group(0)!)
+      .toList();
+  for (final m in RegExp(r'\(([^)]*)\)|\[([^\]]*)\]').allMatches(text)) {
+    final inner = m.group(1) ?? m.group(2) ?? '';
+    if (_isAllergenList(inner)) declarations.add(inner);
+  }
+  final parts = text.split(RegExp(r'\r?\n|\s+[–—-]\s+|[|;]'));
+  if (parts.length > 1) {
+    declarations.addAll(parts.where((part) => _isAllergenList(part.trim())));
+  }
+  return declarations;
+}
 
 List<DiningClaim> _allergenClaims({
   required List<String> values,
@@ -834,12 +919,20 @@ List<DiningClaim> _allergenClaims({
     final confirmed =
         source == DiningInfoSource.sign &&
         _signSupportsAllergen(signText, canonical);
+    if (!confirmed) continue;
+    final aliases = _allergenAliases[canonical]!;
+    final mayContain = _allergenDeclarations(signText).any(
+      (declaration) =>
+          RegExp(
+            r'\bmay\s+contain',
+            caseSensitive: false,
+          ).hasMatch(declaration) &&
+          _aliasPattern(aliases).hasMatch(declaration),
+    );
     claims.add(
       DiningClaim(
-        label: canonical,
-        certainty: confirmed
-            ? DiningCertainty.confirmed
-            : DiningCertainty.estimated,
+        label: mayContain ? 'May contain $canonical' : canonical,
+        certainty: DiningCertainty.confirmed,
       ),
     );
   }
@@ -887,8 +980,7 @@ String? _canonicalAllergen(String raw) {
       return entry.key;
     }
   }
-  if (_containsWord(lower, 'allergen')) return null;
-  return _titleCase(cleaned);
+  return null;
 }
 
 String? _canonicalDietary(String raw) {
@@ -904,7 +996,7 @@ String? _canonicalDietary(String raw) {
   if (cleaned.isEmpty || cleaned.length > 40) return null;
   final lower = cleaned.toLowerCase();
   for (final entry in _dietaryAliases.entries) {
-    if (entry.value.any((alias) => lower.contains(alias))) return entry.key;
+    if (_aliasPattern(entry.value).hasMatch(lower)) return entry.key;
   }
   return null;
 }
@@ -912,9 +1004,12 @@ String? _canonicalDietary(String raw) {
 bool _signSupportsAllergen(String signText, String canonical) {
   if (_signNegatesAllergen(signText, canonical)) return false;
   final aliases = _allergenAliases[canonical] ?? [canonical.toLowerCase()];
-  final lower = signText.toLowerCase();
-  return aliases.any(
-    (alias) => _containsWord(lower, alias) && !_signNegatesAlias(lower, alias),
+  return _allergenDeclarations(signText).any(
+    (declaration) => aliases.any(
+      (alias) =>
+          _containsWord(declaration.toLowerCase(), alias) &&
+          !_signNegatesAlias(declaration.toLowerCase(), alias),
+    ),
   );
 }
 
@@ -945,21 +1040,17 @@ bool _signNegatesAlias(String signLower, String alias) {
 bool _signSupportsDietary(String signText, String canonical) {
   final aliases = _dietaryAliases[canonical] ?? [canonical.toLowerCase()];
   final lower = signText.toLowerCase();
-  return aliases.any(lower.contains);
+  return aliases.any(
+    (alias) =>
+        _aliasPattern([alias]).hasMatch(lower) &&
+        !RegExp(
+          '\\b(?:not|non|no)[\\s-]+${RegExp.escape(alias)}\\b',
+        ).hasMatch(lower),
+  );
 }
 
 bool _containsWord(String text, String word) {
   return RegExp('\\b${RegExp.escape(word)}s?\\b').hasMatch(text);
-}
-
-String _titleCase(String value) {
-  return value
-      .split(' ')
-      .where((part) => part.isNotEmpty)
-      .map(
-        (part) => '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
-      )
-      .join(' ');
 }
 
 String _append(String current, String addition) {

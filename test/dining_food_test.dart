@@ -50,19 +50,18 @@ void main() {
         expect(food.confidence, 'high');
         expect(food.informationSource, DiningInfoSource.sign);
         expect(_claim(food.allergens, 'Dairy'), DiningCertainty.confirmed);
-        expect(_claim(food.allergens, 'Wheat'), DiningCertainty.estimated);
+        expect(_claim(food.allergens, 'Wheat'), isNull);
         expect(
           _claim(food.dietaryPreferences, 'Vegetarian'),
           DiningCertainty.confirmed,
         );
-        expect(food.notices.join(' '), contains(kPleaseConfirmWithStaff));
-        expect(food.notices.join(' '), contains(kLumioCouldNotConfirm));
+        expect(food.notices.join(' '), contains(kPleaseAskStaffAllergens));
 
         final spoken = spokenDiningFood(food);
         expect(spoken, contains('located at the top left'));
         expect(spoken, contains('Vegetarian'));
         expect(spoken, contains('Dairy'));
-        expect(spoken, contains('Wheat may also be present'));
+        expect(spoken, isNot(contains('Wheat may also be present')));
         expect(spoken, contains('dining staff'));
       },
     );
@@ -100,7 +99,7 @@ void main() {
       expect(food.notices.join(' '), contains(kPleaseConfirmWithStaff));
       expect(
         spokenDiningFood(food),
-        contains('Possible allergens: Dairy and Wheat'),
+        contains('Allergens could not be confirmed'),
       );
       expect(spokenDiningFood(food), isNot(contains('confirmed fact')));
     });
@@ -120,7 +119,7 @@ void main() {
       ''');
       final food = result.foods.single;
       expect(food.informationSource, DiningInfoSource.visualEstimate);
-      expect(food.allergens.single.certainty, DiningCertainty.estimated);
+      expect(food.allergens, isEmpty);
       expect(
         food.dietaryPreferences.single.certainty,
         DiningCertainty.estimated,
@@ -146,7 +145,7 @@ void main() {
         food.allergens.map((claim) => claim.label),
         isNot(contains('Wheat')),
       );
-      expect(_claim(food.allergens, 'Soy'), DiningCertainty.estimated);
+      expect(_claim(food.allergens, 'Soy'), isNull);
       expect(
         _claim(food.dietaryPreferences, 'Vegan'),
         DiningCertainty.confirmed,
