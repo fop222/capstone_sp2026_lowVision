@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'app_tts.dart';
 import 'dining_food.dart';
 import 'dining_image_strips.dart';
+import 'dining_ocr.dart';
 import 'dining_results_screen.dart';
 import 'grocery_ui.dart';
 import 'ocr_config.dart';
@@ -37,6 +38,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   bool _takingPicture = false;
   bool _analyzing = false;
   bool _lookingCloser = false;
+  bool _readingLabels = false;
   int _elapsed = 0;
   Timer? _progressTimer;
   String? _cameraError;
@@ -182,7 +184,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       _statusError = null;
       _elapsed = 0;
     });
-    unawaited(_speak('Analyzing foods.'));
+    unawaited(_speak('Reading food and drink labels, then identifying items.'));
     // Visible seconds and a periodic spoken update, so a long scan never
     // looks or sounds frozen.
     _progressTimer?.cancel();
@@ -222,11 +224,14 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   /// Sends one image to `/predict` and returns the model's answer text, or
   /// null when the server failed.
   Future<String?> _askVlm(Uint8List bytes, String filename) async {
+    // Run OCR on this exact image (including a crop) before asking the VLM.
+    // Whole-photo labels must never be passed to an unrelated crop.
+    final labelText = await _readDiningLabels(bytes, filename);
     final request = http.MultipartRequest('POST', vlmPredictUri())
       ..files.add(
         http.MultipartFile.fromBytes('image', bytes, filename: filename),
       )
-      ..fields['question'] = kDiningVlmPrompt
+      ..fields['question'] = diningPromptWithOcr(labelText)
       ..fields['task'] = kDiningVlmTask
       ..fields['max_tokens'] = '$kDiningMaxTokens';
     // The Vercel proxy stops at 60 s; a normal call takes 5-20 s.
@@ -236,6 +241,29 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     final decoded = jsonDecode(body);
     if (decoded is! Map) return '';
     return (decoded['answer'] as String? ?? '').trim();
+  }
+
+  Future<String> _readDiningLabels(Uint8List bytes, String filename) async {
+    if (mounted) setState(() => _readingLabels = true);
+    final client = http.Client();
+    try {
+      final request = http.MultipartRequest('POST', ocrMultipartUri())
+        ..files.add(
+          http.MultipartFile.fromBytes('image', bytes, filename: filename),
+        );
+      final response = await client
+          .send(request)
+          .then(http.Response.fromStream)
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) return '';
+      return diningOcrText(jsonDecode(response.body));
+    } catch (error) {
+      debugPrint('Dining label OCR unavailable: $error');
+      return '';
+    } finally {
+      client.close();
+      if (mounted) setState(() => _readingLabels = false);
+    }
   }
 
   Future<DiningParseResult> _runDiningPredict(Uint8List bytes) async {
@@ -312,7 +340,11 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
                 const CircularProgressIndicator(color: kBrandPurpleLight),
                 const SizedBox(height: 16),
                 Text(
-                  '${_lookingCloser ? 'Looking closer at each part…' : 'Analyzing foods…'}  ${_elapsed}s',
+                  '${_readingLabels
+                      ? 'Reading food and drink labels…'
+                      : _lookingCloser
+                      ? 'Looking closer at each part…'
+                      : 'Identifying foods and drinks…'}  ${_elapsed}s',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 22,
