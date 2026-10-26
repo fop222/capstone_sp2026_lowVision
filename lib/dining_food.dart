@@ -477,8 +477,14 @@ DiningParseResult _resultFromEntries(
   final seenIds = <String, int>{};
   for (final entry in cleaned) {
     final score = num.tryParse('${entry['identification_confidence']}');
+    // A printed Contains line on the dish's own card is evidence beyond the
+    // model's self-score, which it gives as 0.8 for nearly everything.
+    final minimum =
+        _allergenDeclaration.hasMatch(_stringValue(entry['sign_text']))
+        ? 0.75
+        : 0.85;
     if (entry['clearly_visible'] == false ||
-        (score != null && (!score.isFinite || score < 0.85 || score > 1)) ||
+        (score != null && (!score.isFinite || score < minimum || score > 1)) ||
         (requireEvidence &&
             (score == null || entry['clearly_visible'] != true))) {
       continue;
@@ -921,17 +927,30 @@ Map<String, dynamic>? _withCardSignOnly(Map<String, dynamic> entry) {
       .split(RegExp(r'[\n;|]'))
       .map((l) => l.trim())
       .where((l) => l.isNotEmpty && !diningBannerLine.hasMatch(l))
-      .toList();
+      .fold<List<String>>([], (out, line) {
+        // Icon cards print one allergen per line under "Contains:".
+        final last = out.isEmpty ? '' : out.last;
+        if (RegExp(r'contains?\s*:', caseSensitive: false).hasMatch(last) &&
+            !line.contains(':')) {
+          out[out.length - 1] = '$last, $line';
+        } else {
+          out.add(line);
+        }
+        return out;
+      });
   final signWords = lines
       .join(' ')
-      .split(RegExp(r's+'))
+      .split(RegExp(r'\s+'))
       .where((w) => w.isNotEmpty);
   final sign = lines.length > 6 || signWords.length > 20
       ? ''
       : lines.join('\n');
 
   var dish = _stringValue(entry['dish_name']).trim();
-  final dishWords = dish.split(RegExp(r's+')).where((w) => w.isNotEmpty).length;
+  final dishWords = dish
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .length;
   if (diningBannerLine.hasMatch(dish) || dishWords > 7) {
     dish = _stringValue(entry['visible_food']).trim();
     if (dish.isEmpty) return null;
@@ -942,6 +961,10 @@ Map<String, dynamic>? _withCardSignOnly(Map<String, dynamic> entry) {
     'dish_name': dish,
     'sign_text': sign,
     if (wasSign && sign.isEmpty) 'information_source': 'visual estimate',
+    // The model often calls an allergen card a "visual estimate"; its printed
+    // Contains line is still the card's declaration.
+    if (!wasSign && _allergenDeclaration.hasMatch(sign))
+      'information_source': 'sign',
   };
 }
 
@@ -961,6 +984,28 @@ const _shortForms = {
   'spag': 'spaghetti',
 };
 
+DiningFood _withClaimsFrom(DiningFood keep, DiningFood from) {
+  List<DiningClaim> union(List<DiningClaim> a, List<DiningClaim> b) => [
+    ...a,
+    for (final c in b)
+      if (!a.any((x) => x.label.toLowerCase() == c.label.toLowerCase())) c,
+  ];
+  if (from.allergens.isEmpty && from.dietaryPreferences.isEmpty) return keep;
+  return DiningFood(
+    dishName: keep.dishName,
+    location: keep.location,
+    confidence: keep.confidence,
+    signText: keep.signText.isEmpty ? from.signText : keep.signText,
+    allergens: union(keep.allergens, from.allergens),
+    dietaryPreferences: union(keep.dietaryPreferences, from.dietaryPreferences),
+    informationSource: keep.informationSource == DiningInfoSource.sign
+        ? keep.informationSource
+        : from.informationSource,
+    warning: keep.warning,
+    signPartial: keep.signPartial,
+  );
+}
+
 List<DiningFood> _withoutRepeatedKinds(List<DiningFood> foods) {
   List<String> words(DiningFood f) => [
     for (final w in f.dishName.toLowerCase().split(RegExp(r'[^a-z0-9À-￿]+')))
@@ -977,17 +1022,36 @@ List<DiningFood> _withoutRepeatedKinds(List<DiningFood> foods) {
       if (!_fillerWords.contains(x)) _shortForms[x] ?? x,
   };
   final keys = [for (final w in all) key(w)];
-  bool isGeneral(int i) {
+
+  /// Index of the fuller name this one repeats, or -1.
+  int absorbedBy(int i) {
     final mine = keys[i];
-    if (mine.isEmpty) return false;
+    if (mine.isEmpty) return -1;
     for (var j = 0; j < keys.length; j++) {
       final other = keys[j];
       if (j == i || !other.containsAll(mine)) continue;
       // Fuller name wins; for equal names the first one stays.
-      if (other.length > mine.length || j < i) return true;
+      if (other.length > mine.length || j < i) return j;
     }
-    return false;
+    return -1;
   }
+
+  bool isGeneral(int i) => absorbedBy(i) >= 0;
+
+  // A repeat can carry the card the kept name lacks ("Thai Peanut" with
+  // "Contains: Peanuts" folded into "Thai Peanut Noodles"): keep its
+  // allergens and dietary tags on the item that stays.
+  final merged = [...foods];
+  for (var i = 0; i < foods.length; i++) {
+    var j = absorbedBy(i);
+    for (var hops = 0; j >= 0 && hops < foods.length; hops++) {
+      final next = absorbedBy(j);
+      if (next < 0) break;
+      j = next;
+    }
+    if (j >= 0) merged[j] = _withClaimsFrom(merged[j], foods[i]);
+  }
+  foods = merged;
 
   final perHead = <String, int>{};
   return [

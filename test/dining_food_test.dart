@@ -550,6 +550,66 @@ void main() {
       );
     });
 
+    test('allergen icon cards attach their Contains line to the dish', () {
+      final result = parseDiningStrips([
+        (
+          column: 'left',
+          raw: jsonEncode({
+            'foods': [
+              {
+                ...item('Grilled Atlantic Salmon', ''),
+                'sign_text': 'Grilled Atlantic Salmon\nContains: Fish\nSoy',
+                'information_source': 'sign',
+              },
+            ],
+          }),
+        ),
+        (
+          column: 'center',
+          raw: jsonEncode({
+            'foods': [
+              // Model calls these estimates and scores them 0.8; the card
+              // printed under each is still its declaration.
+              {
+                ...item('Egg Fried Rice', ''),
+                'identification_confidence': 0.8,
+                'sign_text': 'Contains: Eggs Soy Sesame',
+                'information_source': 'visual estimate',
+              },
+              {
+                ...item('Thai Peanut', ''),
+                'identification_confidence': 0.8,
+                'sign_text': 'Contains: Peanuts',
+                'information_source': 'visual estimate',
+              },
+              {
+                ...item('Creamy Mac and Cheese', ''),
+                'identification_confidence': 0.8,
+                'sign_text':
+                    'ALLERGEN INFORMATION\nPlease read the ingredient information for each menu item',
+              },
+            ],
+          }),
+        ),
+        (
+          column: 'right',
+          raw: jsonEncode({
+            'foods': [item('Thai Peanut Noodles', '')],
+          }),
+        ),
+      ], requireEvidence: true);
+      final byName = {
+        for (final f in result.foods)
+          f.dishName: f.allergens.map((c) => c.chipLabel).toSet(),
+      };
+      expect(byName['Grilled Atlantic Salmon'], {'Fish', 'Soy'});
+      expect(byName['Egg Fried Rice'], {'Eggs', 'Soy', 'Sesame'});
+      expect(byName['Thai Peanut Noodles'], {'Peanuts'});
+      expect(byName.containsKey('Thai Peanut'), isFalse);
+      // Banner text alone is no evidence: 0.8 without a card stays out.
+      expect(byName.containsKey('Creamy Mac and Cheese'), isFalse);
+    });
+
     test('the same tray named two ways is listed once', () {
       expect(
         names([
