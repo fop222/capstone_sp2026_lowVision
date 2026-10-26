@@ -31,18 +31,21 @@ const String kVisualAllergenSafety =
 /// model from looping; generic names like "salad" are banned because it
 /// otherwise uses them for every dish.
 const String kDiningVlmPrompt = '''
-Look at this dining photo. It may show a buffet line, serving pans, a station, a plate, a tray, or a close-up of one dish.
-First count how many separate pans, bowls, or portions of food you can see. Then describe each one exactly once, left to right, then top to bottom. If a sign or label names a food, use the words on the sign.
+Look at this dining photo. It may show a buffet line, serving pans, a plate, a tray, or a fountain drink station.
+Count only clearly visible, prominent foods and readable drink options. Describe each one exactly once, left to right. Include dispenser labels even when no drink is visible in a cup. Ignore empty containers, utensils, decorations, tiny toppings, and distant or obscured foods.
 
-Name each food specifically by its main ingredient and color, the way a person would say it out loud. Never use a general word like "salad", "sauce", "meat", or "food" by itself; say which kind (the main vegetable, meat, grain, or color).
+Read each nearby dish or drink label carefully. Use a readable label's exact dish name (for example Marinara), rather than a generic guess. Recheck letters affected by glare; do not complete unreadable words or autocorrect a brand or dish from memory. Without a readable label, use a short visual estimate such as red sauce. Do not invent exact ingredients, flavors, seasonings, or hidden fillings. Prefer a broad supported name over a specific guess.
 
 Return ONLY compact JSON on one line, no other text:
-{"count":0,"foods":[{"dish_name":"...","location":"...","sign_text":"","information_source":"visual estimate","confidence":"medium"}]}
+{"count":0,"foods":[{"item_id":"1","dish_name":"...","location":"...","sign_text":"","information_source":"visual estimate","confidence":"medium","identification_confidence":0.9,"clearly_visible":true}]}
 
 Rules:
 - foods has exactly "count" objects, one per pan, bowl, or portion, then the JSON ends.
 - No two objects have the same dish_name.
+- item_id identifies one physical serving container or drink option. Do not list both cupcakes and vanilla cupcakes for the same tray. Keep distinct varieties separate.
+- identification_confidence is a number from 0 to 1 for the name you give. Only name an item if it is clearly visible and this score is at least 0.85. This is your estimate, not a measured probability. Omit uncertain items; the user can take a closer photo.
 - location is where that food sits in the photo frame: top left, top center, top right, middle left, middle center, middle right, bottom left, bottom center, or bottom right. Several foods may share a location.
+- Items in the same row share the same row word. Use left or right alone if depth or row is unclear; never invent different rows for a single row of pans.
 - sign_text is only text you can actually read on a sign or label in the photo; otherwise "".
 - information_source is "sign" with confidence "high" only when you read the dish name on a sign; then add "allergens" and "dietary_preferences" lists with only the words on the sign.
 - Otherwise information_source is "visual estimate" with confidence "medium" or "low". Do not invent exact ingredients.
@@ -184,12 +187,15 @@ const String kDiningParseError =
 
 /// Parses and validates a VLM dining answer. Invalid entries are dropped.
 /// Allergen and dietary claims are re-labeled before anything is shown.
-DiningParseResult parseDiningResponse(String raw) {
+DiningParseResult parseDiningResponse(
+  String raw, {
+  bool requireEvidence = false,
+}) {
   final entries = _entriesFromRaw(raw);
   if (entries == null) {
     return const DiningParseResult(foods: [], error: kDiningParseError);
   }
-  return _resultFromEntries(entries);
+  return _resultFromEntries(entries, requireEvidence: requireEvidence);
 }
 
 /// Left, center, and right strips of one photo, as sent by the scan screen
@@ -197,18 +203,24 @@ DiningParseResult parseDiningResponse(String raw) {
 /// word; the column comes from the strip itself, which is more reliable
 /// than the small model's own left/right guess.
 DiningParseResult parseDiningStrips(
-  List<({String column, String raw})> strips,
-) {
+  List<({String column, String raw})> strips, {
+  bool requireEvidence = false,
+}) {
   final entries = <Map<String, dynamic>>[];
   for (final strip in strips) {
     for (final entry in _entriesFromRaw(strip.raw) ?? const []) {
       final row = RegExp(
         r'top|middle|bottom',
       ).firstMatch(_stringValue(entry['location']).toLowerCase())?.group(0);
-      entries.add({...entry, 'location': '${row ?? 'middle'} ${strip.column}'});
+      entries.add({
+        ...entry,
+        if (entry['item_id'] != null)
+          'item_id': '${strip.column}:${entry['item_id']}',
+        'location': '${row ?? 'middle'} ${strip.column}',
+      });
     }
   }
-  return _resultFromEntries(entries);
+  return _resultFromEntries(entries, requireEvidence: requireEvidence);
 }
 
 /// True when the model counted several foods but named only a few, i.e. it
@@ -245,7 +257,10 @@ List<Map<String, dynamic>>? _entriesFromRaw(String raw) {
   return _foodEntries(decoded);
 }
 
-DiningParseResult _resultFromEntries(List<Map<String, dynamic>> entries) {
+DiningParseResult _resultFromEntries(
+  List<Map<String, dynamic>> entries, {
+  bool requireEvidence = false,
+}) {
   final cleaned = _withoutFakeSigns(entries);
 
   // The small VLM often loops, repeating one food until the token limit.
@@ -253,10 +268,31 @@ DiningParseResult _resultFromEntries(List<Map<String, dynamic>> entries) {
   // only the first of each.
   final foods = <DiningFood>[];
   final seenNames = <String>{};
+  final seenIds = <String, int>{};
   for (final entry in cleaned) {
+    final score = num.tryParse('${entry['identification_confidence']}');
+    if (entry['clearly_visible'] == false ||
+        (score != null && (!score.isFinite || score < 0.85 || score > 1)) ||
+        (requireEvidence &&
+            (score == null || entry['clearly_visible'] != true))) {
+      continue;
+    }
     final food = _foodFromMap(entry);
     if (food == null) continue;
-    if (seenNames.add(food.dishName.toLowerCase().trim())) foods.add(food);
+    final id = _stringValue(entry['item_id']).trim();
+    final existing = id.isEmpty ? null : seenIds[id];
+    if (existing != null) {
+      // A readable label is preferable to a generic estimate of the same tray.
+      if (food.informationSource == DiningInfoSource.sign &&
+          foods[existing].informationSource != DiningInfoSource.sign) {
+        foods[existing] = food;
+      }
+      continue;
+    }
+    if (seenNames.add(_signKey(food.dishName))) {
+      if (id.isNotEmpty) seenIds[id] = foods.length;
+      foods.add(food);
+    }
   }
 
   final sorted = sortDiningFoods(foods);
@@ -683,7 +719,10 @@ DiningFood? _foodFromMap(Map<String, dynamic> map) {
 
 String _knownLocation(String raw) {
   final normalized = normalizeDiningLocation(raw);
-  if (kDiningLocations.contains(normalized)) return normalized;
+  if (kDiningLocations.contains(normalized) ||
+      normalized == 'left' ||
+      normalized == 'right')
+    return normalized;
   return '';
 }
 

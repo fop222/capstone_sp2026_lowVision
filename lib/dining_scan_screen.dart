@@ -93,7 +93,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       }
       final controller = CameraController(
         cams.first,
-        ResolutionPreset.medium,
+        ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -248,7 +248,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
               'Lumio could not analyze this photo. Please try again or ask dining staff.',
         );
       }
-      final full = parseDiningResponse(answer);
+      final full = parseDiningResponse(answer, requireEvidence: true);
       if (!diningAnswerLooped(answer)) return full;
 
       // Crowded photo: the model repeated one food instead of naming each
@@ -267,7 +267,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
           debugPrint('Dining strip ${strip.column} failed: $error');
         }
       }
-      final closer = parseDiningStrips(answers);
+      final closer = parseDiningStrips(answers, requireEvidence: true);
       return closer.foods.length > full.foods.length ? closer : full;
     } catch (error) {
       debugPrint('Dining predict error: $error');

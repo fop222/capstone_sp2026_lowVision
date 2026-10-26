@@ -6,7 +6,10 @@ void main() {
     test('asks for every food, sign priority, and uncertain allergens', () {
       expect(kDiningVlmPrompt, contains('"foods"'));
       expect(kDiningVlmPrompt, contains('"count"'));
-      expect(kDiningVlmPrompt, contains('describe each one exactly once'));
+      expect(
+        kDiningVlmPrompt.toLowerCase(),
+        contains('describe each one exactly once'),
+      );
       expect(kDiningVlmPrompt, contains('No two objects have the same'));
       for (final location in kDiningLocations) {
         expect(kDiningVlmPrompt, contains(location));
