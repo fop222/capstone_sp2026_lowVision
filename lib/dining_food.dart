@@ -48,7 +48,7 @@ Rules:
 - location describes distance from the viewer, never image coordinates. When perspective clearly shows depth, use: closest to you on your left, closest to you, closest to you on your right, farther from you on your left, farther from you, farther from you on your right, furthest from you on your left, furthest from you, or furthest from you on your right.
 - For one row of pans or dispensers, or whenever depth is unclear, use: to your left, in front of you, or to your right. Never infer distance just from an item's vertical position in the image. Do not use top, bottom, center, or middle-right. Return location "" if uncertain.
 - Prioritize prominent items that the user can clearly distinguish. Skip insignificant objects and distant foods too small to identify. Several items can share a location.
-- sign_text is only text you can actually read on a sign or label in the photo; otherwise "".
+- sign_text is only text you can actually read on that dish's own card or label, at most 12 words (its name and any Contains line); otherwise "". Never copy a banner, a legend of allergen icons, or another dish's card.
 - information_source is "sign" with confidence "high" only when you read the dish name on a sign; then add "allergens" and "dietary_preferences" lists with only the words on the sign.
 - dish_name contains only the dish name, never dietary tags or allergen declarations. Put Vegetarian/Veg, Vegan, Pescatarian, Gluten-Free/GF, Dairy-Free, Keto, Low-Carb, Low-Sodium, Halal, and Kosher in dietary_preferences. Put explicitly printed allergen declarations in allergens. If the sign does not state allergens, return an empty allergens list; do not infer allergens from the dish name or appearance.
 - Otherwise information_source is "visual estimate" with confidence "medium" or "low". Do not invent exact ingredients.
@@ -905,7 +905,7 @@ Map<String, dynamic> _withVisibleFood(Map<String, dynamic> entry) {
 
 /// Lines from an over-arching banner ("ALLERGEN INFORMATION / Please read
 /// the ingredient information for each menu item"), never one dish's card.
-final _bannerLine = RegExp(
+final diningBannerLine = RegExp(
   r'allergen information|please read|ingredient information|'
   r'for each (menu )?item|menu item|nutrition information',
   caseSensitive: false,
@@ -920,7 +920,7 @@ Map<String, dynamic>? _withCardSignOnly(Map<String, dynamic> entry) {
   final lines = _stringValue(entry['sign_text'])
       .split(RegExp(r'[\n;|]'))
       .map((l) => l.trim())
-      .where((l) => l.isNotEmpty && !_bannerLine.hasMatch(l))
+      .where((l) => l.isNotEmpty && !diningBannerLine.hasMatch(l))
       .toList();
   final signWords = lines
       .join(' ')
@@ -932,7 +932,7 @@ Map<String, dynamic>? _withCardSignOnly(Map<String, dynamic> entry) {
 
   var dish = _stringValue(entry['dish_name']).trim();
   final dishWords = dish.split(RegExp(r's+')).where((w) => w.isNotEmpty).length;
-  if (_bannerLine.hasMatch(dish) || dishWords > 7) {
+  if (diningBannerLine.hasMatch(dish) || dishWords > 7) {
     dish = _stringValue(entry['visible_food']).trim();
     if (dish.isEmpty) return null;
   }

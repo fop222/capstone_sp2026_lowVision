@@ -12,7 +12,15 @@ String diningOcrText(Object? response) {
   final raw = lines is List && lines.isNotEmpty
       ? lines.whereType<String>().join('\n')
       : (response['full_text'] ?? response['text'] ?? '').toString();
-  final cleaned = raw.trim();
+  // Over-arching banners ("ALLERGEN INFORMATION / Please read the
+  // ingredient information for each menu item") belong to no dish. Left in,
+  // the model copied them into every item, which made one answer take
+  // 37 s and pass the app's time limit on a tablet.
+  final cleaned = raw
+      .split('\n')
+      .where((line) => !diningBannerLine.hasMatch(line))
+      .join('\n')
+      .trim();
   if (RegExp(
     r'^(?:no text found|\(?no text detected\)?)\.?$',
     caseSensitive: false,
@@ -23,7 +31,16 @@ String diningOcrText(Object? response) {
   return cleaned.length > 6000 ? cleaned.substring(0, 6000) : cleaned;
 }
 
+/// More scattered OCR pieces than this means a whole counter of cards was
+/// read at once, in no useful order. The 2B model then pasted all of it
+/// into every dish (37 s for one answer); it reads such cards better alone.
+const int kDiningMaxOcrLines = 20;
+
 String diningPromptWithOcr(String text) {
+  final pieces = text
+      .split(String.fromCharCode(10))
+      .where((l) => l.trim().isNotEmpty);
+  if (pieces.length > kDiningMaxOcrLines) text = '';
   if (text.isEmpty) {
     return '$kDiningVlmPrompt\n'
         'OCR found no usable printed text. Use visual identification for '

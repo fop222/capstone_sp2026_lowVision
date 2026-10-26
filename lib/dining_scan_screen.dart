@@ -18,7 +18,7 @@ import 'ocr_config.dart';
 import 'take_picture_screen.dart' show backCamerasOnly;
 
 /// One `/predict` call; the Vercel proxy itself gives up at 60 s.
-const Duration _kCallTimeout = Duration(seconds: 45);
+const Duration _kCallTimeout = Duration(seconds: 55);
 
 /// Strips are only started while this much time remains, so a crowded photo
 /// adds at most about a minute.
