@@ -952,6 +952,15 @@ List<String> _nameWords(String name) => [
       w.endsWith('s') && w.length > 3 ? w.substring(0, w.length - 1) : w,
 ];
 
+const _fillerWords = {'and', 'with', 'the', 'of', 'in', 'on', 'a', 'n'};
+
+/// Short forms on cards, mapped to the full word.
+const _shortForms = {
+  'mac': 'macaroni',
+  'veggie': 'vegetable',
+  'spag': 'spaghetti',
+};
+
 List<DiningFood> _withoutRepeatedKinds(List<DiningFood> foods) {
   List<String> words(DiningFood f) => [
     for (final w in f.dishName.toLowerCase().split(RegExp(r'[^a-z0-9À-￿]+')))
@@ -959,14 +968,23 @@ List<DiningFood> _withoutRepeatedKinds(List<DiningFood> foods) {
         w.endsWith('s') && w.length > 3 ? w.substring(0, w.length - 1) : w,
   ];
   final all = [for (final f in foods) words(f)];
+  // Same tray named twice by overlapping strips: "Creamy Mac and Cheese" /
+  // "Creamy Macaroni and Cheese", "Thai Peanut" / "Thai Peanut Noodles".
+  // Compare word sets, ignoring filler words and common short forms; when
+  // one name's words all appear in another, keep the fuller name.
+  Set<String> key(List<String> w) => {
+    for (final x in w)
+      if (!_fillerWords.contains(x)) _shortForms[x] ?? x,
+  };
+  final keys = [for (final w in all) key(w)];
   bool isGeneral(int i) {
-    final mine = all[i];
+    final mine = keys[i];
     if (mine.isEmpty) return false;
-    for (var j = 0; j < all.length; j++) {
-      final other = all[j];
-      if (j == i || other.length <= mine.length) continue;
-      final tail = other.sublist(other.length - mine.length);
-      if (tail.join(' ') == mine.join(' ')) return true;
+    for (var j = 0; j < keys.length; j++) {
+      final other = keys[j];
+      if (j == i || !other.containsAll(mine)) continue;
+      // Fuller name wins; for equal names the first one stays.
+      if (other.length > mine.length || j < i) return true;
     }
     return false;
   }

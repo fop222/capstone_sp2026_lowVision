@@ -550,6 +550,29 @@ void main() {
       );
     });
 
+    test('the same tray named two ways is listed once', () {
+      expect(
+        names([
+          item('Grilled Atlantic Salmon', 'closest to you on your left'),
+          item('Creamy Macaroni and Cheese', 'closest to you on your left'),
+          item('Creamy Mac and Cheese', 'closest to you'),
+          item('Egg Fried Rice', 'closest to you'),
+          item('Thai Peanut Noodles', 'closest to you on your right'),
+          item('Shrimp Stir Fry', 'closest to you on your right'),
+          item('Mustard Roasted Vegetables', 'closest to you on your right'),
+          item('Thai Peanut', 'farther from you'),
+        ]),
+        unorderedEquals([
+          'Grilled Atlantic Salmon',
+          'Creamy Macaroni and Cheese',
+          'Egg Fried Rice',
+          'Thai Peanut Noodles',
+          'Shrimp Stir Fry',
+          'Mustard Roasted Vegetables',
+        ]),
+      );
+    });
+
     test('any repeat in a long list asks for a closer look', () {
       // Dessert case: 7 written, 4 distinct names.
       const dessert =

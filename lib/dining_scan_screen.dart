@@ -347,7 +347,15 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
 
       // An empty first answer gets the closer look too: the small model
       // sometimes declines a whole crowded counter but names each part.
+      // A counter of printed cards gets the closer look too: on one photo
+      // the full view read "Steamed Baked Fish" or "Stuffed Grilled
+      // Salmon" across neighbouring cards, while each strip read its cards
+      // correctly.
+      final labelled = full.foods
+          .where((f) => f.informationSource == DiningInfoSource.sign)
+          .length;
       if (full.foods.isNotEmpty &&
+          labelled < 2 &&
           !diningAnswerLooped(answer) &&
           !diningAnswerIncomplete(answer)) {
         return full;
@@ -370,7 +378,8 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
         }
       }
       final closer = parseDiningStrips(answers, requireEvidence: true);
-      return closer.foods.length > full.foods.length ? closer : full;
+      // Strips read cards more reliably; prefer them unless they found less.
+      return closer.foods.length >= full.foods.length ? closer : full;
     } catch (error) {
       debugPrint('Dining predict error: $error');
       return const DiningParseResult(
