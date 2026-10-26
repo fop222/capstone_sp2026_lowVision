@@ -482,6 +482,35 @@ void main() {
       );
     });
 
+    test('OCR noise from a background menu board is not a food', () {
+      expect(
+        names([
+          item('Cocetote', 'to your right', 'Cocetote'),
+          item('Foodiatice', 'to your right', 'Foodiatice'),
+          item('Kfade=', 'to your right', 'Kfade='),
+          item(
+            'Funfetti Krispie Treats',
+            'to your left',
+            'Funfetti\nKrispie Treats',
+          ),
+          item(
+            'Creamy Tomato Basil Soup',
+            'to your left',
+            'Creamy Tomato Basil Soup',
+          ),
+          item('Sprite', 'to your right', 'Sprite'),
+          // Written by the model from what it sees, not copied: kept.
+          item('Blue fudge squares', 'in front of you'),
+        ]),
+        unorderedEquals([
+          'Funfetti Krispie Treats',
+          'Creamy Tomato Basil Soup',
+          'Sprite',
+          'Blue fudge squares',
+        ]),
+      );
+    });
+
     test('any repeat in a long list asks for a closer look', () {
       // Dessert case: 7 written, 4 distinct names.
       const dessert =
