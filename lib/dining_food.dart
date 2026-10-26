@@ -235,16 +235,15 @@ DiningParseResult parseDiningStrips(
   return _resultFromEntries(entries, requireEvidence: requireEvidence);
 }
 
-/// Asked only for drink stations. The general prompt's "readable label, no
-/// brand from memory, 0.85 confidence" rules make the 2B model return just
-/// the one plain-text label (WATER) on a soda fountain, because brand names
-/// are logos that OCR cannot read. Asked this narrower question, it reads
-/// every dispenser in order.
+/// A focused pass for drink stations. The general dining prompt missed brand
+/// labels on the fountain reference image and returned only water.
 const String kDiningDrinkPrompt =
     'This photo may show a fountain drink dispenser, a beverage station, or '
     'a drink cooler. List every drink option on the dispenser labels or '
     'bottles, left to right, using the brand or drink name shown on each '
-    'label. One entry per label, including water. If no drinks are shown, '
+    'label. Preserve readable Diet or Zero Sugar qualifiers and flavors; '
+    'regular and diet versions are different options. '
+    'One entry per label, including water. If no drinks are shown, '
     'return an empty list. Return JSON only: {"drinks":["..."]}';
 
 final RegExp _drinkWords = RegExp(
@@ -278,6 +277,11 @@ DiningParseResult parseDiningDrinks(
   String raw, {
   DiningParseResult? alongside,
 }) {
+  final names = _drinkNamesFromRaw(raw);
+  return _resultFromDrinkNames(names, alongside: alongside);
+}
+
+List<String> _drinkNamesFromRaw(String raw) {
   final extracted = _extractJsonObject(raw);
   Object? decoded;
   try {
@@ -296,6 +300,19 @@ DiningParseResult parseDiningDrinks(
           ]
           .where((n) => n.isNotEmpty && !_junkNames.contains(n.toLowerCase()))
           .toList();
+  return names;
+}
+
+bool diningDrinksNeedCloserLook(String raw) {
+  final names = _drinkNamesFromRaw(raw);
+  return names.length > names.map(_signKey).toSet().length;
+}
+
+DiningParseResult _resultFromDrinkNames(
+  List<String> names, {
+  DiningParseResult? alongside,
+  List<String>? locations,
+}) {
   if (names.isEmpty) {
     return alongside ??
         const DiningParseResult(foods: [], error: kDiningParseError);
@@ -306,11 +323,13 @@ DiningParseResult parseDiningDrinks(
       {
         'item_id': 'drink:$i',
         'dish_name': names[i],
-        'location': i * 3 < names.length
-            ? 'to your left'
-            : i * 3 < names.length * 2
-            ? 'in front of you'
-            : 'to your right',
+        'location':
+            locations?[i] ??
+            (i * 3 < names.length
+                ? 'to your left'
+                : i * 3 < names.length * 2
+                ? 'in front of you'
+                : 'to your right'),
         'sign_text': names[i],
         'information_source': 'sign',
         'confidence': 'medium',
@@ -324,6 +343,56 @@ DiningParseResult parseDiningDrinks(
       if (seen.add(_signKey(food.dishName))) food,
   ];
   return DiningParseResult(foods: sortDiningFoods(foods));
+}
+
+/// Merge overlapping close-ups without combining regular and diet drinks.
+/// A plain brand and its more specific flavor in adjacent crops describe
+/// one option; distinct flavors and sugar variants remain separate.
+DiningParseResult parseDiningDrinkStrips(
+  List<({String column, String raw})> strips, {
+  DiningParseResult? alongside,
+}) {
+  final names = <String>[];
+  final locations = <String>[];
+  for (final strip in strips) {
+    for (final name in _drinkNamesFromRaw(strip.raw)) {
+      final duplicate = names.indexWhere(
+        (old) =>
+            _signKey(old) == _signKey(name) ||
+            _sameDrinkWithMoreDetail(old, name),
+      );
+      if (duplicate >= 0) {
+        if (name.length > names[duplicate].length) names[duplicate] = name;
+        continue;
+      }
+      names.add(name);
+      locations.add(
+        strip.column == 'center'
+            ? 'in front of you'
+            : 'to your ${strip.column}',
+      );
+    }
+  }
+  return _resultFromDrinkNames(
+    names,
+    locations: locations,
+    alongside: alongside,
+  );
+}
+
+bool _sameDrinkWithMoreDetail(String first, String second) {
+  Set<String> words(String value) => value
+      .toLowerCase()
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((w) => w.isNotEmpty)
+      .toSet();
+  final a = words(first);
+  final b = words(second);
+  // Never turn a regular drink into a diet/zero/caffeine-free variant.
+  for (final qualifier in ['diet', 'zero', 'sugar', 'free', 'caffeine']) {
+    if (a.contains(qualifier) != b.contains(qualifier)) return false;
+  }
+  return a.containsAll(b) || b.containsAll(a);
 }
 
 /// "WATER" -> "Water"; mixed-case brand names ("Hi-C", "Dr Pepper") stay.

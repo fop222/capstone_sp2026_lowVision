@@ -295,15 +295,52 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       // Drink station: brand labels are logos the regular pass will not
       // name, so ask about the drinks directly.
       if (diningLooksLikeDrinkStation(labels: _lastLabels, answer: answer)) {
-        final raw = await _askVlmQuestion(
-          bytes,
-          'dining_drinks.jpg',
-          kDiningDrinkPrompt,
-          maxTokens: 256,
-        );
-        if (raw != null) {
-          final drinks = parseDiningDrinks(raw, alongside: full);
-          if (drinks.foods.length > full.foods.length) return drinks;
+        unawaited(_speak('Reading the drink options.'));
+        try {
+          final raw = await _askVlmQuestion(
+            bytes,
+            'dining_drinks.jpg',
+            kDiningDrinkPrompt,
+            maxTokens: 256,
+          );
+          if (raw != null) {
+            final drinks = parseDiningDrinks(raw, alongside: full);
+            if (diningDrinksNeedCloserLook(raw)) {
+              final closeups = <({String column, String raw})>[];
+              try {
+                if (mounted) setState(() => _lookingCloser = true);
+                final deadline = DateTime.now().add(_kCloserLookBudget);
+                for (final strip in await cropDiningStrips(bytes)) {
+                  final remaining = deadline.difference(DateTime.now());
+                  if (remaining <= Duration.zero) break;
+                  final detail = await _askVlmQuestion(
+                    strip.png,
+                    'drinks_${strip.column}.png',
+                    kDiningDrinkPrompt,
+                    maxTokens: 256,
+                  ).timeout(remaining);
+                  if (detail != null && parseDiningDrinks(detail).isValid) {
+                    closeups.add((column: strip.column, raw: detail));
+                  }
+                }
+              } catch (error) {
+                debugPrint('Dining drink close-up failed: $error');
+              }
+              // Keep the complete first pass if any region could not be read.
+              if (closeups.length == 3) {
+                final detailed = parseDiningDrinkStrips(
+                  closeups,
+                  alongside: full,
+                );
+                if (detailed.foods.length >= drinks.foods.length)
+                  return detailed;
+              }
+            }
+            if (drinks.foods.length > full.foods.length) return drinks;
+          }
+        } catch (error) {
+          // A failed supplemental pass must not discard the initial result.
+          debugPrint('Dining drink scan failed: $error');
         }
       }
 
