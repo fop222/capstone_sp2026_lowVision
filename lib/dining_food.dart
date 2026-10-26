@@ -235,6 +235,107 @@ DiningParseResult parseDiningStrips(
   return _resultFromEntries(entries, requireEvidence: requireEvidence);
 }
 
+/// Asked only for drink stations. The general prompt's "readable label, no
+/// brand from memory, 0.85 confidence" rules make the 2B model return just
+/// the one plain-text label (WATER) on a soda fountain, because brand names
+/// are logos that OCR cannot read. Asked this narrower question, it reads
+/// every dispenser in order.
+const String kDiningDrinkPrompt =
+    'This photo may show a fountain drink dispenser, a beverage station, or '
+    'a drink cooler. List every drink option on the dispenser labels or '
+    'bottles, left to right, using the brand or drink name shown on each '
+    'label. One entry per label, including water. If no drinks are shown, '
+    'return an empty list. Return JSON only: {"drinks":["..."]}';
+
+final RegExp _drinkWords = RegExp(
+  r'\b(water|soda|pop|cola|coke|pepsi|sprite|fanta|lemonade|iced tea|'
+  r'juice|powerade|gatorade|hi-?c|dr\.? ?pepper|mountain dew|root beer|'
+  r'ginger ale|seltzer|sparkling)\b',
+  caseSensitive: false,
+);
+
+/// True when the scan looks like a drink station: several dispenser "PUSH"
+/// buttons in the printed text, or a first answer that names a drink.
+bool diningLooksLikeDrinkStation({
+  required String labels,
+  required String answer,
+}) {
+  final pushes = RegExp(
+    r'\bpu[s5][hn]\b',
+    caseSensitive: false,
+  ).allMatches(labels).length;
+  if (pushes >= 2) return true;
+  final names = (_entriesFromRaw(answer) ?? const [])
+      .map((e) => _stringValue(e['dish_name']))
+      .join(' ');
+  return _drinkWords.hasMatch(names);
+}
+
+/// Turns a [kDiningDrinkPrompt] answer into one item per drink. Drinks are
+/// in a row, so their order gives left / in front / right. Food from the
+/// regular scan ([alongside]) is kept unless it repeats a drink.
+DiningParseResult parseDiningDrinks(
+  String raw, {
+  DiningParseResult? alongside,
+}) {
+  final extracted = _extractJsonObject(raw);
+  Object? decoded;
+  try {
+    decoded = extracted == null ? null : jsonDecode(extracted);
+  } catch (_) {
+    decoded = null;
+  }
+  final list = decoded is Map ? decoded['drinks'] : decoded;
+  final names =
+      <String>[
+            if (list is List)
+              for (final item in list)
+                _drinkName(
+                  item is Map ? _stringValue(item['name']) : _stringValue(item),
+                ),
+          ]
+          .where((n) => n.isNotEmpty && !_junkNames.contains(n.toLowerCase()))
+          .toList();
+  if (names.isEmpty) {
+    return alongside ??
+        const DiningParseResult(foods: [], error: kDiningParseError);
+  }
+
+  final entries = <Map<String, dynamic>>[
+    for (var i = 0; i < names.length; i++)
+      {
+        'item_id': 'drink:$i',
+        'dish_name': names[i],
+        'location': i * 3 < names.length
+            ? 'to your left'
+            : i * 3 < names.length * 2
+            ? 'in front of you'
+            : 'to your right',
+        'sign_text': names[i],
+        'information_source': 'sign',
+        'confidence': 'medium',
+      },
+  ];
+  final drinks = _resultFromEntries(entries).foods;
+  final seen = {for (final d in drinks) _signKey(d.dishName)};
+  final foods = [
+    ...drinks,
+    for (final food in alongside?.foods ?? const <DiningFood>[])
+      if (seen.add(_signKey(food.dishName))) food,
+  ];
+  return DiningParseResult(foods: sortDiningFoods(foods));
+}
+
+/// "WATER" -> "Water"; mixed-case brand names ("Hi-C", "Dr Pepper") stay.
+String _drinkName(String raw) {
+  final name = raw.trim();
+  if (name.length < 3 || name != name.toUpperCase()) return name;
+  return name.toLowerCase().replaceAllMapped(
+    RegExp(r'\b[a-z]'),
+    (m) => m.group(0)!.toUpperCase(),
+  );
+}
+
 /// True when the model counted several foods but named only a few, i.e. it
 /// repeated one entry instead of describing each pan. A closer look at
 /// smaller parts of the photo usually breaks the loop.

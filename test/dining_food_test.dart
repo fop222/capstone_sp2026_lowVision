@@ -425,6 +425,89 @@ void main() {
       );
     });
   });
+
+  group('drink stations', () {
+    // OCR and model output recorded from the Sprint 21 fountain photo.
+    const fountainOcr =
+        'WATERI\nRPfer)\nGania\nHRC\n@atrt\nFbwer | RBve)\n9\n@utr\nORANGE\n'
+        'Us\nPush\nFusm\nPush\nPUSH\nPUSH\nPUSH\nSpniet';
+    const waterOnly =
+        '{"count":1,"foods":[{"item_id":"1","dish_name":"Water",'
+        '"location":"to your right","sign_text":"WATER",'
+        '"information_source":"sign","confidence":"high",'
+        '"identification_confidence":0.9,"clearly_visible":true}]}';
+    const drinkAnswer =
+        '```json { "drinks": [ "WATER", "Dr Pepper", "Fanta", "HI-C", '
+        '"Coca-Cola", "POWERADE", "Dr Pepper", "Sprite", "Diet Coke", '
+        '"Coca-Cola" ] } ```';
+
+    test('dispenser push buttons or a drink name mark a drink station', () {
+      expect(
+        diningLooksLikeDrinkStation(labels: fountainOcr, answer: ''),
+        isTrue,
+      );
+      expect(
+        diningLooksLikeDrinkStation(labels: '', answer: waterOnly),
+        isTrue,
+      );
+      expect(
+        diningLooksLikeDrinkStation(
+          labels: 'Marinara\nPenne',
+          answer:
+              '{"foods":[{"dish_name":"Penne pasta"},{"dish_name":"Marinara"}]}',
+        ),
+        isFalse,
+      );
+    });
+
+    test('every dispenser becomes a drink, left to right', () {
+      final full = parseDiningResponse(waterOnly, requireEvidence: true);
+      // The bug as seen in the app: only the one plain-text label.
+      expect(full.foods.map((f) => f.dishName), ['WATER']);
+
+      final result = parseDiningDrinks(drinkAnswer, alongside: full);
+      expect(result.foods.map((f) => f.dishName), [
+        'Water',
+        'Dr Pepper',
+        'Fanta',
+        'Hi-C',
+        'Coca-Cola',
+        'Powerade',
+        'Sprite',
+        'Diet Coke',
+      ]);
+      final byName = {for (final f in result.foods) f.dishName: f};
+      expect(byName['Water']!.location, 'to your left');
+      expect(byName['Powerade']!.location, 'in front of you');
+      expect(byName['Diet Coke']!.location, 'to your right');
+      expect(byName['Sprite']!.allergens, isEmpty);
+    });
+
+    test('food scanned with the drinks is kept', () {
+      final food = parseDiningResponse(
+        '{"foods":[{"dish_name":"Popcorn","location":"to your left",'
+        '"identification_confidence":0.9,"clearly_visible":true}]}',
+        requireEvidence: true,
+      );
+      final result = parseDiningDrinks(
+        '{"drinks":["Sprite"]}',
+        alongside: food,
+      );
+      expect(
+        result.foods.map((f) => f.dishName),
+        containsAll(['Popcorn', 'Sprite']),
+      );
+    });
+
+    test('no drinks or bad JSON falls back to the regular scan', () {
+      final full = parseDiningResponse(waterOnly, requireEvidence: true);
+      expect(
+        parseDiningDrinks('{"drinks":[]}', alongside: full).foods.length,
+        1,
+      );
+      expect(parseDiningDrinks('no idea', alongside: full).foods.length, 1);
+    });
+  });
 }
 
 DiningCertainty? _claim(List<DiningClaim> claims, String label) {

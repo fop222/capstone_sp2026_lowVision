@@ -40,6 +40,9 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   bool _lookingCloser = false;
   bool _readingLabels = false;
   int _elapsed = 0;
+
+  /// OCR text from the most recent full-photo [_askVlm] call.
+  String _lastLabels = '';
   Timer? _progressTimer;
   String? _cameraError;
   String? _statusError;
@@ -227,13 +230,24 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     // Run OCR on this exact image (including a crop) before asking the VLM.
     // Whole-photo labels must never be passed to an unrelated crop.
     final labelText = await _readDiningLabels(bytes, filename);
+    _lastLabels = labelText;
+    return _askVlmQuestion(bytes, filename, diningPromptWithOcr(labelText));
+  }
+
+  /// Posts [question] about [bytes] to `/predict`; null when the server failed.
+  Future<String?> _askVlmQuestion(
+    Uint8List bytes,
+    String filename,
+    String question, {
+    int maxTokens = kDiningMaxTokens,
+  }) async {
     final request = http.MultipartRequest('POST', vlmPredictUri())
       ..files.add(
         http.MultipartFile.fromBytes('image', bytes, filename: filename),
       )
-      ..fields['question'] = diningPromptWithOcr(labelText)
+      ..fields['question'] = question
       ..fields['task'] = kDiningVlmTask
-      ..fields['max_tokens'] = '$kDiningMaxTokens';
+      ..fields['max_tokens'] = '$maxTokens';
     // The Vercel proxy stops at 60 s; a normal call takes 5-20 s.
     final response = await request.send().timeout(_kCallTimeout);
     final body = await response.stream.bytesToString().timeout(_kCallTimeout);
@@ -277,6 +291,22 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
         );
       }
       final full = parseDiningResponse(answer, requireEvidence: true);
+
+      // Drink station: brand labels are logos the regular pass will not
+      // name, so ask about the drinks directly.
+      if (diningLooksLikeDrinkStation(labels: _lastLabels, answer: answer)) {
+        final raw = await _askVlmQuestion(
+          bytes,
+          'dining_drinks.jpg',
+          kDiningDrinkPrompt,
+          maxTokens: 256,
+        );
+        if (raw != null) {
+          final drinks = parseDiningDrinks(raw, alongside: full);
+          if (drinks.foods.length > full.foods.length) return drinks;
+        }
+      }
+
       if (!diningAnswerLooped(answer) && !diningAnswerIncomplete(answer)) {
         return full;
       }
