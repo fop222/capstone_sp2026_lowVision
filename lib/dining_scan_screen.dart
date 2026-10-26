@@ -332,8 +332,9 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
                   closeups,
                   alongside: full,
                 );
-                if (detailed.foods.length >= drinks.foods.length)
+                if (detailed.foods.length >= drinks.foods.length) {
                   return detailed;
+                }
               }
             }
             if (drinks.foods.length > full.foods.length) return drinks;
@@ -344,7 +345,11 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
         }
       }
 
-      if (!diningAnswerLooped(answer) && !diningAnswerIncomplete(answer)) {
+      // An empty first answer gets the closer look too: the small model
+      // sometimes declines a whole crowded counter but names each part.
+      if (full.foods.isNotEmpty &&
+          !diningAnswerLooped(answer) &&
+          !diningAnswerIncomplete(answer)) {
         return full;
       }
 

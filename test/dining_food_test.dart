@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_low_vision_app/dining_food.dart';
 
@@ -329,7 +331,9 @@ void main() {
           '{"dish_name":"peppers"},{"dish_name":"white cabbage"},'
           '{"dish_name":"white cabbage"},{"dish_name":"peppers"}]}',
         ),
-        isFalse,
+        // Any repeat in four or more items gets the closer look; the app
+        // still keeps the full-photo list when the strips find no more.
+        isTrue,
       );
       expect(
         diningAnswerLooped(
@@ -423,6 +427,82 @@ void main() {
         diningLocationSortIndex('furthest from you on your left'),
         lessThan(diningLocationSortIndex('not a place')),
       );
+    });
+  });
+
+  group('repeated names (Sprint 21 photos)', () {
+    Map<String, dynamic> item(String name, String location, [String? sign]) => {
+      'dish_name': name,
+      'location': location,
+      'identification_confidence': 0.9,
+      'clearly_visible': true,
+      if (sign != null) ...{'sign_text': sign, 'information_source': 'sign'},
+    };
+    List<String> names(List<Map<String, dynamic>> foods) => parseDiningResponse(
+      jsonEncode({'foods': foods}),
+      requireEvidence: true,
+    ).foods.map((f) => f.dishName).toList();
+
+    test('a general name gives way to a more specific one', () {
+      expect(
+        names([
+          item('Green Beans', 'to your left', 'Green Beans'),
+          item('Stewed Green Beans', 'to your right'),
+          item('Pasta', 'to your left'),
+        ]),
+        unorderedEquals(['Stewed Green Beans', 'Pasta']),
+      );
+    });
+
+    test('cupcakes are not listed under three different names', () {
+      expect(
+        names([
+          item('Cupcakes', 'to your left'),
+          item('Raspberry cupcakes', 'to your left'),
+          item('Vanilla cupcakes', 'in front of you'),
+          item('Blue cupcakes', 'in front of you'),
+          item('Brownies', 'in front of you'),
+        ]),
+        unorderedEquals(['Raspberry cupcakes', 'Vanilla cupcakes', 'Brownies']),
+      );
+    });
+
+    test('menu card headings are not foods', () {
+      expect(
+        names([
+          item('Lunch', 'to your left', 'Lunch'),
+          item('Main Entree', 'to your left', 'Main Entree'),
+          item('Vegetarian', 'to your left', 'Vegetarian'),
+          item('Italian', 'to your right', 'ITALIAN'),
+          item('Honey Ginger Tofu', 'in front of you', 'Honey Ginger Tofu'),
+          item('Vegetarian chili', 'to your right'),
+        ]),
+        // Milestone 3 moves Vegetarian into dietary preferences.
+        unorderedEquals(['Honey Ginger Tofu', 'chili']),
+      );
+    });
+
+    test('any repeat in a long list asks for a closer look', () {
+      // Dessert case: 7 written, 4 distinct names.
+      const dessert =
+          '{"count":7,"foods":[{"dish_name":"cupcakes"},{"dish_name":"cupcakes"},'
+          '{"dish_name":"frozen yogurt"},{"dish_name":"ice cream"},'
+          '{"dish_name":"chocolate bars"},{"dish_name":"chocolate bars"},'
+          '{"dish_name":"chocolate bars"}]}';
+      expect(diningAnswerLooped(dessert), isTrue);
+      expect(
+        diningAnswerLooped(
+          '{"count":4,"foods":[{"dish_name":"Pasta"},{"dish_name":"Sauce"},'
+          '{"dish_name":"Green Beans"},{"dish_name":"Rice"}]}',
+        ),
+        isFalse,
+      );
+    });
+
+    test('the prompt has no example dish the model can copy', () {
+      expect(kDiningVlmPrompt, isNot(contains('Marinara')));
+      expect(kDiningVlmPrompt, isNot(contains('red sauce')));
+      expect(kDiningVlmPrompt, isNot(contains('at least 0.85')));
     });
   });
 

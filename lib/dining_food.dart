@@ -34,7 +34,7 @@ const String kDiningVlmPrompt = '''
 Look at this dining photo. It may show a buffet line, serving pans, a plate, a tray, or a fountain drink station.
 Count only clearly visible, prominent foods and readable drink options. Describe each one exactly once, left to right. Include dispenser labels even when no drink is visible in a cup. Ignore empty containers, utensils, decorations, tiny toppings, and distant or obscured foods.
 
-Read each nearby dish or drink label carefully. Use a readable label's exact dish name (for example Marinara), rather than a generic guess. Recheck letters affected by glare; do not complete unreadable words or autocorrect a brand or dish from memory. Without a readable label, use a short visual estimate such as red sauce. Do not invent exact ingredients, flavors, seasonings, or hidden fillings. Prefer a broad supported name over a specific guess.
+Read each nearby dish or drink label carefully. Use a readable label's exact dish name rather than a generic guess. Recheck letters affected by glare; do not complete unreadable words or autocorrect a brand or dish from memory. Without a readable label, use a short visual estimate of the main food and its color. Do not invent exact ingredients, flavors, seasonings, or hidden fillings. Prefer a broad supported name over a specific guess.
 
 Return ONLY compact JSON on one line, no other text:
 {"count":0,"foods":[{"item_id":"1","dish_name":"...","location":"...","sign_text":"","information_source":"visual estimate","confidence":"medium","identification_confidence":0.9,"clearly_visible":true}]}
@@ -42,8 +42,8 @@ Return ONLY compact JSON on one line, no other text:
 Rules:
 - foods has exactly "count" objects, one per pan, bowl, or portion, then the JSON ends.
 - No two objects have the same dish_name.
-- item_id identifies one physical serving container or drink option. Do not list both cupcakes and vanilla cupcakes for the same tray. Keep distinct varieties separate.
-- identification_confidence is a number from 0 to 1 for the name you give. Only name an item if it is clearly visible and this score is at least 0.85. This is your estimate, not a measured probability. Omit uncertain items; the user can take a closer photo.
+- item_id identifies one physical tray, pan, or drink option. Give each tray one name only: never list a general name and a more specific name for the same tray, and never list the same kind of food twice. Different varieties on different trays stay separate.
+- identification_confidence is a number from 0 to 1 for the name you give. List every tray of food you can clearly see; omit only items you cannot make out. The user can take a closer photo.
 - location describes distance from the viewer, never image coordinates. When perspective clearly shows depth, use: closest to you on your left, closest to you, closest to you on your right, farther from you on your left, farther from you, farther from you on your right, furthest from you on your left, furthest from you, or furthest from you on your right.
 - For one row of pans or dispensers, or whenever depth is unclear, use: to your left, in front of you, or to your right. Never infer distance just from an item's vertical position in the image. Do not use top, bottom, center, or middle-right. Return location "" if uncertain.
 - Prioritize prominent items that the user can clearly distinguish. Skip insignificant objects and distant foods too small to identify. Several items can share a location.
@@ -335,7 +335,7 @@ DiningParseResult _resultFromDrinkNames(
         'confidence': 'medium',
       },
   ];
-  final drinks = _resultFromEntries(entries).foods;
+  final drinks = _resultFromEntries(entries, mergeKinds: false).foods;
   final seen = {for (final d in drinks) _signKey(d.dishName)};
   final foods = [
     ...drinks,
@@ -420,7 +420,10 @@ bool diningAnswerLooped(String raw) {
       .map((e) => _stringValue(e['dish_name']).toLowerCase().trim())
       .where((n) => n.isNotEmpty)
       .toSet();
-  return written >= 4 && names.length * 2 < written;
+  // Any repeat in a list of four or more means some trays went unnamed
+  // (a dessert case named "cupcakes" twice and "chocolate bars" three
+  // times while skipping the fudge and brownies).
+  return written >= 4 && names.length < written;
 }
 
 /// Longer relative locations must not silently truncate a multi-item scan.
@@ -450,6 +453,7 @@ List<Map<String, dynamic>>? _entriesFromRaw(String raw) {
 DiningParseResult _resultFromEntries(
   List<Map<String, dynamic>> entries, {
   bool requireEvidence = false,
+  bool mergeKinds = true,
 }) {
   final cleaned = _withoutFakeSigns(entries);
 
@@ -485,11 +489,94 @@ DiningParseResult _resultFromEntries(
     }
   }
 
-  final sorted = sortDiningFoods(foods);
+  final sorted = sortDiningFoods(
+    mergeKinds ? _withoutRepeatedKinds(foods) : foods,
+  );
   if (sorted.isEmpty) {
     return const DiningParseResult(foods: [], error: kDiningParseError);
   }
   return DiningParseResult(foods: sorted);
+}
+
+/// The 2B model names one tray several ways ("cupcakes", "vanilla
+/// cupcakes", "blue cupcakes"), and overlapping strips see a tray twice.
+/// - A general name is dropped when a more specific one ends with it
+///   ("Cupcakes" when "Raspberry cupcakes" is listed).
+/// - At most two items share a final word; a third "... cupcakes" is
+///   almost always the same tray again.
+/// Drink lists skip this: "Dr Pepper" and "Diet Dr Pepper" are both real.
+/// Words printed on menu cards and station signs, not on food. The model
+/// copies big signs ("Lunch", "Main Entree", "Italian") into the list.
+const _menuHeadingWords = {
+  'menu',
+  'lunch',
+  'breakfast',
+  'brunch',
+  'dinner',
+  'main',
+  'entree',
+  'entre',
+  'side',
+  'today',
+  'special',
+  'station',
+  'hour',
+  'operation',
+  'open',
+  'closed',
+  'vegetarian',
+  'vegan',
+  'italian',
+  'mexican',
+  'asian',
+  'american',
+  'chinese',
+  'indian',
+  'grill',
+  'deli',
+  'bakery',
+  'kitchen',
+  'cafe',
+  'dining',
+  'hall',
+  'buffet',
+  'and',
+  'of',
+  'the',
+  '&',
+};
+
+bool _isMenuHeading(List<String> words) =>
+    words.isNotEmpty && words.every(_menuHeadingWords.contains);
+
+List<DiningFood> _withoutRepeatedKinds(List<DiningFood> foods) {
+  List<String> words(DiningFood f) => [
+    for (final w in f.dishName.toLowerCase().split(RegExp(r'[^a-z0-9À-￿]+')))
+      if (w.isNotEmpty)
+        w.endsWith('s') && w.length > 3 ? w.substring(0, w.length - 1) : w,
+  ];
+  final all = [for (final f in foods) words(f)];
+  bool isGeneral(int i) {
+    final mine = all[i];
+    if (mine.isEmpty) return false;
+    for (var j = 0; j < all.length; j++) {
+      final other = all[j];
+      if (j == i || other.length <= mine.length) continue;
+      final tail = other.sublist(other.length - mine.length);
+      if (tail.join(' ') == mine.join(' ')) return true;
+    }
+    return false;
+  }
+
+  final perHead = <String, int>{};
+  return [
+    for (var i = 0; i < foods.length; i++)
+      if (!_isMenuHeading(all[i]) &&
+          !isGeneral(i) &&
+          (all[i].isEmpty ||
+              (perHead[all[i].last] = (perHead[all[i].last] ?? 0) + 1) <= 2))
+        foods[i],
+  ];
 }
 
 /// Clears sign_text the model did not actually read off a dish label:
