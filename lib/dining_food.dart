@@ -1067,7 +1067,7 @@ String _stringValue(Object? value) => value == null ? '' : value.toString();
 List<String> _stringList(Object? value) {
   if (value is! List) {
     if (value is String && value.trim().isNotEmpty) return [value.trim()];
-    return const [];
+    return <String>[];
   }
   return value
       .map((item) => item.toString().trim())
