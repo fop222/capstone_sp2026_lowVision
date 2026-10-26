@@ -33,7 +33,7 @@ void main() {
         final result = parseDiningResponse('''
         {"foods":[{
           "dish_name":"Chicken Lasagna",
-          "location":"top left",
+          "location":"closest to you on your left",
           "confidence":"high",
           "sign_text":"Vegetable Lasagna - Vegetarian - Contains Dairy",
           "allergens":["Dairy","Wheat"],
@@ -46,7 +46,7 @@ void main() {
         expect(result.isValid, isTrue);
         final food = result.foods.single;
         expect(food.dishName, 'Vegetable Lasagna');
-        expect(food.location, 'top left');
+        expect(food.location, 'closest to you on your left');
         expect(food.confidence, 'high');
         expect(food.informationSource, DiningInfoSource.sign);
         expect(_claim(food.allergens, 'Dairy'), DiningCertainty.confirmed);
@@ -58,7 +58,7 @@ void main() {
         expect(food.notices.join(' '), contains(kPleaseAskStaffAllergens));
 
         final spoken = spokenDiningFood(food);
-        expect(spoken, contains('located at the top left'));
+        expect(spoken, contains('located closest to you on your left'));
         expect(spoken, contains('Vegetarian'));
         expect(spoken, contains('Dairy'));
         expect(spoken, isNot(contains('Wheat may also be present')));
@@ -70,7 +70,7 @@ void main() {
       final result = parseDiningResponse('''
         {"foods":[{
           "dish_name":"Pasta Primavera",
-          "location":"middle center",
+          "location":"farther from you",
           "confidence":"high",
           "sign_text":"",
           "allergens":["Dairy","Wheat"],
@@ -108,7 +108,7 @@ void main() {
       final result = parseDiningResponse('''
         {"foods":[{
           "dish_name":"Roasted Vegetables",
-          "location":"bottom right",
+          "location":"furthest from you on your right",
           "confidence":"high",
           "sign_text":"",
           "allergens":["Dairy"],
@@ -130,7 +130,7 @@ void main() {
       final result = parseDiningResponse('''
         {"foods":[{
           "dish_name":"Rice Bowl",
-          "location":"top right",
+          "location":"closest to you on your right",
           "confidence":"high",
           "sign_text":"Rice Bowl - Vegan - Gluten-Free",
           "allergens":["Wheat","Soy"],
@@ -160,7 +160,7 @@ void main() {
       final result = parseDiningResponse('''
         {"foods":[{
           "dish_name":"Soup",
-          "location":"middle left",
+          "location":"farther from you on your left",
           "confidence":"low",
           "sign_text":"Tomato... Veget...",
           "allergens":["Dairy"],
@@ -184,10 +184,10 @@ void main() {
     test('several foods on one plate are kept and ordered by location', () {
       final result = parseDiningResponse('''
         {"foods":[
-          {"dish_name":"Brownie","location":"bottom right","confidence":"medium","sign_text":"","allergens":[],"dietary_preferences":[],"information_source":"visual estimate","warning":""},
-          {"dish_name":"Mashed Potatoes","location":"top center","confidence":"medium","sign_text":"","allergens":["Dairy"],"dietary_preferences":["Possibly vegetarian"],"information_source":"visual estimate","warning":""},
-          {"dish_name":"Roast Chicken","location":"middle left","confidence":"medium","sign_text":"","allergens":[],"dietary_preferences":[],"information_source":"visual estimate","warning":""},
-          {"dish_name":"Green Beans","location":"top left","confidence":"medium","sign_text":"","allergens":[],"dietary_preferences":["Possibly vegan"],"information_source":"visual estimate","warning":""}
+          {"dish_name":"Brownie","location":"furthest from you on your right","confidence":"medium","sign_text":"","allergens":[],"dietary_preferences":[],"information_source":"visual estimate","warning":""},
+          {"dish_name":"Mashed Potatoes","location":"closest to you","confidence":"medium","sign_text":"","allergens":["Dairy"],"dietary_preferences":["Possibly vegetarian"],"information_source":"visual estimate","warning":""},
+          {"dish_name":"Roast Chicken","location":"farther from you on your left","confidence":"medium","sign_text":"","allergens":[],"dietary_preferences":[],"information_source":"visual estimate","warning":""},
+          {"dish_name":"Green Beans","location":"closest to you on your left","confidence":"medium","sign_text":"","allergens":[],"dietary_preferences":["Possibly vegan"],"information_source":"visual estimate","warning":""}
         ]}
       ''');
 
@@ -198,10 +198,10 @@ void main() {
         'Brownie',
       ]);
       expect(result.foods.map((food) => food.location), [
-        'top left',
-        'top center',
-        'middle left',
-        'bottom right',
+        'closest to you on your left',
+        'closest to you',
+        'farther from you on your left',
+        'furthest from you on your right',
       ]);
     });
 
@@ -209,18 +209,18 @@ void main() {
       final result = parseDiningResponse('''
         ```json
         {"foods":[
-          {"dish_name":"Pasta with red sauce","location":"top-left","confidence":"low","sign_text":"","allergens":["Wheat"],"dietary_preferences":[],"information_source":"visual estimate","warning":"Similar to the other pasta."},
-          {"dish_name":"Pasta with white sauce","location":"top right","confidence":"low","sign_text":"","allergens":["Dairy","Wheat"],"dietary_preferences":[],"information_source":"visual estimate","warning":""},
-          {"dish_name":"Pasta with vegetables","location":"middle","confidence":"low","sign_text":"","allergens":["Wheat"],"dietary_preferences":[],"information_source":"visual estimate","warning":""}
+          {"dish_name":"Pasta with red sauce","location":"closest to you on your left","confidence":"low","sign_text":"","allergens":["Wheat"],"dietary_preferences":[],"information_source":"visual estimate","warning":"Similar to the other pasta."},
+          {"dish_name":"Pasta with white sauce","location":"closest to you on your right","confidence":"low","sign_text":"","allergens":["Dairy","Wheat"],"dietary_preferences":[],"information_source":"visual estimate","warning":""},
+          {"dish_name":"Pasta with vegetables","location":"farther from you","confidence":"low","sign_text":"","allergens":["Wheat"],"dietary_preferences":[],"information_source":"visual estimate","warning":""}
         ],}
         ```
       ''');
 
       expect(result.foods, hasLength(3));
       expect(result.foods.map((food) => food.location), [
-        'top left',
-        'top right',
-        'middle center',
+        'closest to you on your left',
+        'closest to you on your right',
+        'farther from you',
       ]);
       expect(
         result.foods.every(
@@ -235,19 +235,19 @@ void main() {
     test('buffet pans with clear signs use each sign', () {
       final result = parseDiningResponse('''
         {"foods":[
-          {"dish_name":"Guess","location":"bottom","confidence":"high","sign_text":"Tofu Stir Fry - Vegan - Contains Soy","allergens":["Soy"],"dietary_preferences":["Vegan"],"information_source":"sign","warning":""},
-          {"dish_name":"Guess","location":"top","confidence":"high","sign_text":"Beef Stew - Contains Wheat","allergens":["Wheat"],"dietary_preferences":[],"information_source":"sign","warning":""}
+          {"dish_name":"Guess","location":"furthest from you","confidence":"high","sign_text":"Tofu Stir Fry - Vegan - Contains Soy","allergens":["Soy"],"dietary_preferences":["Vegan"],"information_source":"sign","warning":""},
+          {"dish_name":"Guess","location":"closest to you","confidence":"high","sign_text":"Beef Stew - Contains Wheat","allergens":["Wheat"],"dietary_preferences":[],"information_source":"sign","warning":""}
         ]}
       ''');
 
       expect(result.foods.first.dishName, 'Beef Stew');
-      expect(result.foods.first.location, 'top center');
+      expect(result.foods.first.location, 'closest to you');
       expect(
         _claim(result.foods.first.allergens, 'Wheat'),
         DiningCertainty.confirmed,
       );
       expect(result.foods.last.dishName, 'Tofu Stir Fry');
-      expect(result.foods.last.location, 'bottom center');
+      expect(result.foods.last.location, 'furthest from you');
       expect(
         _claim(result.foods.last.allergens, 'Soy'),
         DiningCertainty.confirmed,
@@ -262,7 +262,7 @@ void main() {
       final unknown = parseDiningResponse('''
         {"foods":[{
           "dish_name":"Unidentified food",
-          "location":"middle right",
+          "location":"farther from you on your right",
           "confidence":"low",
           "sign_text":"",
           "allergens":[],
@@ -287,9 +287,9 @@ void main() {
     test('sign text that echoes a visual guess is dropped', () {
       final result = parseDiningResponse('''
         {"foods":[
-          {"dish_name":"pepper","location":"bottom left","sign_text":"pepper","information_source":"visual estimate"},
-          {"dish_name":"Buns","location":"top center","sign_text":"Bun","information_source":"visual estimate"},
-          {"dish_name":"white cheese","location":"bottom left","sign_text":"BLUE CHEESE","information_source":"visual estimate"}
+          {"dish_name":"pepper","location":"furthest from you on your left","sign_text":"pepper","information_source":"visual estimate"},
+          {"dish_name":"Buns","location":"closest to you","sign_text":"Bun","information_source":"visual estimate"},
+          {"dish_name":"white cheese","location":"furthest from you on your left","sign_text":"BLUE CHEESE","information_source":"visual estimate"}
         ]}
       ''');
       final byName = {for (final f in result.foods) f.dishName: f};
@@ -300,7 +300,7 @@ void main() {
 
     test('a real sign that names the dish is kept', () {
       final result = parseDiningResponse('''
-        {"foods":[{"dish_name":"Chicken Lasagna","location":"top left","sign_text":"Chicken Lasagna","information_source":"sign","confidence":"high"}]}
+        {"foods":[{"dish_name":"Chicken Lasagna","location":"closest to you on your left","sign_text":"Chicken Lasagna","information_source":"sign","confidence":"high"}]}
       ''');
       expect(result.foods.single.signText, 'Chicken Lasagna');
       expect(result.foods.single.informationSource, DiningInfoSource.sign);
@@ -309,8 +309,8 @@ void main() {
     test('one sign on several foods is a station sign, not a dish label', () {
       final result = parseDiningResponse('''
         {"foods":[
-          {"dish_name":"potato","location":"top left","sign_text":"Köks världen allergen!","information_source":"visual estimate"},
-          {"dish_name":"meatballs","location":"top center","sign_text":"Köks världen allergen!","information_source":"visual estimate"}
+          {"dish_name":"potato","location":"closest to you on your left","sign_text":"Köks världen allergen!","information_source":"visual estimate"},
+          {"dish_name":"meatballs","location":"closest to you","sign_text":"Köks världen allergen!","information_source":"visual estimate"}
         ]}
       ''');
       expect(result.foods.every((f) => f.signText.isEmpty), isTrue);
@@ -319,7 +319,7 @@ void main() {
     test('a counted-but-repeated answer is detected as a loop', () {
       final looped =
           '{"count":13,"foods":['
-          '${List.filled(13, '{"dish_name":"pepper","location":"bottom left"}').join(',')}'
+          '${List.filled(13, '{"dish_name":"pepper","location":"furthest from you on your left"}').join(',')}'
           ']}';
       expect(diningAnswerLooped(looped), isTrue);
       expect(
@@ -344,30 +344,30 @@ void main() {
         (
           column: 'left',
           raw:
-              '{"foods":[{"dish_name":"carrots","location":"bottom right"},'
-              '{"dish_name":"beets","location":"top center","sign_text":"SALAD BAR"}]}',
+              '{"foods":[{"dish_name":"carrots","location":"furthest from you on your right"},'
+              '{"dish_name":"beets","location":"closest to you","sign_text":"SALAD BAR"}]}',
         ),
         (
           column: 'center',
           raw:
-              '{"foods":[{"dish_name":"carrots","location":"bottom center"},'
-              '{"dish_name":"peas","location":"middle left","sign_text":"SALAD BAR"}]}',
+              '{"foods":[{"dish_name":"carrots","location":"furthest from you"},'
+              '{"dish_name":"peas","location":"farther from you on your left","sign_text":"SALAD BAR"}]}',
         ),
         (column: 'right', raw: 'not json'),
       ]);
       final byName = {for (final f in result.foods) f.dishName: f};
       expect(byName.keys, containsAll(['carrots', 'beets', 'peas']));
-      expect(byName['carrots']!.location, 'bottom left');
-      expect(byName['beets']!.location, 'top left');
-      expect(byName['peas']!.location, 'middle center');
+      expect(byName['carrots']!.location, 'furthest from you on your left');
+      expect(byName['beets']!.location, 'closest to you on your left');
+      expect(byName['peas']!.location, 'farther from you');
       expect(byName['beets']!.signText, isEmpty);
     });
 
     test('the list speaks name and location only', () {
       final food = parseDiningResponse(
-        '{"foods":[{"dish_name":"Meatballs","location":"bottom center"}]}',
+        '{"foods":[{"dish_name":"Meatballs","location":"furthest from you"}]}',
       ).foods.single;
-      expect(spokenDiningFoodBrief(food), 'Meatballs, bottom center.');
+      expect(spokenDiningFoodBrief(food), 'Meatballs, furthest from you.');
       expect(spokenDiningFood(food), isNot(contains('This appears to be')));
       expect(spokenDiningFood(food), isNot(contains(kLumioCouldNotConfirm)));
     });
@@ -375,11 +375,11 @@ void main() {
     test('a looping answer keeps one entry per food name', () {
       final result = parseDiningResponse('''
         {"count":5,"foods":[
-          {"dish_name":"Meatballs","location":"top center","information_source":"visual estimate"},
-          {"dish_name":"Red sauce","location":"top center","information_source":"visual estimate"},
-          {"dish_name":"meatballs","location":"top center","information_source":"visual estimate"},
-          {"dish_name":"Red sauce","location":"bottom left","information_source":"visual estimate"},
-          {"dish_name":"Meatballs","location":"top right","information_source":"visual estimate"}
+          {"dish_name":"Meatballs","location":"closest to you","information_source":"visual estimate"},
+          {"dish_name":"Red sauce","location":"closest to you","information_source":"visual estimate"},
+          {"dish_name":"meatballs","location":"closest to you","information_source":"visual estimate"},
+          {"dish_name":"Red sauce","location":"furthest from you on your left","information_source":"visual estimate"},
+          {"dish_name":"Meatballs","location":"closest to you on your right","information_source":"visual estimate"}
         ]}
       ''');
       expect(result.foods.map((f) => f.dishName), ['Meatballs', 'Red sauce']);
@@ -387,7 +387,7 @@ void main() {
 
     test('unidentified food shows one short notice, even as an estimate', () {
       final result = parseDiningResponse('''
-        {"foods":[{"dish_name":"unidentified food","location":"bottom center",
+        {"foods":[{"dish_name":"unidentified food","location":"furthest from you",
           "confidence":"low","information_source":"visual estimate",
           "warning":"the dish could not be confirmed"}]}
       ''');
@@ -399,11 +399,11 @@ void main() {
 
     test('answer cut off by the token limit keeps the finished foods', () {
       final result = parseDiningResponse(
-        '{"foods":[{"dish_name":"Roast potatoes","location":"bottom left",'
+        '{"foods":[{"dish_name":"Roast potatoes","location":"furthest from you on your left",'
         '"confidence":"medium","sign_text":"","allergens":[],'
         '"dietary_preferences":[],"information_source":"visual estimate",'
         '"warning":"Say \\"ask staff\\" {first}"},'
-        '{"dish_name":"Meatballs","location":"bottom center",'
+        '{"dish_name":"Meatballs","location":"furthest from you",'
         '"confidence":"medium","sign_text":"","allergens":[],'
         '"dietary_preferences":[],"information_source":"visual estimate",'
         '"warning":""},{"dish_name":"',
@@ -415,12 +415,12 @@ void main() {
       ]);
     });
 
-    test('different camera angles still map onto the nine locations', () {
-      expect(normalizeDiningLocation('upper left'), 'top left');
-      expect(normalizeDiningLocation('centre'), 'middle center');
-      expect(normalizeDiningLocation('lower right'), 'bottom right');
+    test('legacy frame coordinates never imply physical distance', () {
+      expect(normalizeDiningLocation('upper left'), 'to your left');
+      expect(normalizeDiningLocation('centre'), 'in front of you');
+      expect(normalizeDiningLocation('lower right'), 'to your right');
       expect(
-        diningLocationSortIndex('bottom left'),
+        diningLocationSortIndex('furthest from you on your left'),
         lessThan(diningLocationSortIndex('not a place')),
       );
     });

@@ -6,7 +6,7 @@ import 'package:my_low_vision_app/dining_food.dart';
 Map<String, Object?> item(String name, {String? id}) => {
   'dish_name': name,
   'item_id': id,
-  'location': 'middle left',
+  'location': 'farther from you on your left',
   'information_source': 'visual estimate',
   'identification_confidence': 0.9,
   'clearly_visible': true,
@@ -16,6 +16,19 @@ DiningParseResult scan(List<Map<String, Object?>> entries) =>
     parseDiningResponse(jsonEncode({'foods': entries}), requireEvidence: true);
 
 void main() {
+  test('relative distances sort closest first and are spoken naturally', () {
+    final result = scan([
+      {...item('Rice'), 'location': 'furthest from you'},
+      {...item('Beans'), 'location': 'closest to you on your left'},
+    ]);
+    expect(result.foods.map((f) => f.dishName), ['Beans', 'Rice']);
+    expect(
+      spokenDiningFoodBrief(result.foods.first),
+      'Beans, closest to you on your left.',
+    );
+    expect(result.foods.first.locationLabel, 'Closest to you on your left');
+  });
+
   test(
     'dietary tags leave the title; only declared allergens are retained',
     () {

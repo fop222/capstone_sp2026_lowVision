@@ -80,7 +80,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Foods are listed from the top of the photo to the bottom. Tap a food for allergens and dietary details.',
+                    'When distance is clear, the closest items are listed first. Tap an item for allergens and dietary details.',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 20,

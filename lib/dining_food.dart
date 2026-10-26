@@ -11,7 +11,7 @@ import 'dart:convert';
 const String kDiningVlmTask = 'dining';
 
 /// Multi-food JSON does not fit the server's short default token limit.
-const int kDiningMaxTokens = 768;
+const int kDiningMaxTokens = 1024;
 
 const String kLumioCouldNotConfirm =
     'Lumio could not confidently confirm this information. Please ask dining staff for verification.';
@@ -44,8 +44,9 @@ Rules:
 - No two objects have the same dish_name.
 - item_id identifies one physical serving container or drink option. Do not list both cupcakes and vanilla cupcakes for the same tray. Keep distinct varieties separate.
 - identification_confidence is a number from 0 to 1 for the name you give. Only name an item if it is clearly visible and this score is at least 0.85. This is your estimate, not a measured probability. Omit uncertain items; the user can take a closer photo.
-- location is where that food sits in the photo frame: top left, top center, top right, middle left, middle center, middle right, bottom left, bottom center, or bottom right. Several foods may share a location.
-- Items in the same row share the same row word. Use left or right alone if depth or row is unclear; never invent different rows for a single row of pans.
+- location describes distance from the viewer, never image coordinates. When perspective clearly shows depth, use: closest to you on your left, closest to you, closest to you on your right, farther from you on your left, farther from you, farther from you on your right, furthest from you on your left, furthest from you, or furthest from you on your right.
+- For one row of pans or dispensers, or whenever depth is unclear, use: to your left, in front of you, or to your right. Never infer distance just from an item's vertical position in the image. Do not use top, bottom, center, or middle-right. Return location "" if uncertain.
+- Prioritize prominent items that the user can clearly distinguish. Skip insignificant objects and distant foods too small to identify. Several items can share a location.
 - sign_text is only text you can actually read on a sign or label in the photo; otherwise "".
 - information_source is "sign" with confidence "high" only when you read the dish name on a sign; then add "allergens" and "dietary_preferences" lists with only the words on the sign.
 - dish_name contains only the dish name, never dietary tags or allergen declarations. Put Vegetarian/Veg, Vegan, Pescatarian, Gluten-Free/GF, Dairy-Free, Keto, Low-Carb, Low-Sodium, Halal, and Kosher in dietary_preferences. Put explicitly printed allergen declarations in allergens. If the sign does not state allergens, return an empty allergens list; do not infer allergens from the dish name or appearance.
@@ -53,15 +54,18 @@ Rules:
 - Use "Unidentified food" only when a food cannot be described at all.''';
 
 const List<String> kDiningLocations = [
-  'top left',
-  'top center',
-  'top right',
-  'middle left',
-  'middle center',
-  'middle right',
-  'bottom left',
-  'bottom center',
-  'bottom right',
+  'closest to you on your left',
+  'closest to you',
+  'closest to you on your right',
+  'farther from you on your left',
+  'farther from you',
+  'farther from you on your right',
+  'furthest from you on your left',
+  'furthest from you',
+  'furthest from you on your right',
+  'to your left',
+  'in front of you',
+  'to your right',
 ];
 
 enum DiningCertainty { confirmed, estimated, unknown }
@@ -200,9 +204,8 @@ DiningParseResult parseDiningResponse(
 }
 
 /// Left, center, and right strips of one photo, as sent by the scan screen
-/// when the full photo looped. Each strip's model location keeps its row
-/// word; the column comes from the strip itself, which is more reliable
-/// than the small model's own left/right guess.
+/// when the full photo looped. Keep explicit relative depth, with horizontal
+/// direction from the crop. Pixel rows never establish physical distance.
 DiningParseResult parseDiningStrips(
   List<({String column, String raw})> strips, {
   bool requireEvidence = false,
@@ -210,14 +213,22 @@ DiningParseResult parseDiningStrips(
   final entries = <Map<String, dynamic>>[];
   for (final strip in strips) {
     for (final entry in _entriesFromRaw(strip.raw) ?? const []) {
-      final row = RegExp(
-        r'top|middle|bottom',
-      ).firstMatch(_stringValue(entry['location']).toLowerCase())?.group(0);
+      final location = normalizeDiningLocation(_stringValue(entry['location']));
+      final depth = RegExp(
+        r'^(closest to you|farther from you|furthest from you)',
+      ).firstMatch(location)?.group(0);
+      final direction = strip.column == 'center'
+          ? 'in front of you'
+          : 'to your ${strip.column}';
       entries.add({
         ...entry,
         if (entry['item_id'] != null)
           'item_id': '${strip.column}:${entry['item_id']}',
-        'location': '${row ?? 'middle'} ${strip.column}',
+        'location': depth == null
+            ? direction
+            : strip.column == 'center'
+            ? depth
+            : '$depth on your ${strip.column}',
       });
     }
   }
@@ -240,6 +251,14 @@ bool diningAnswerLooped(String raw) {
       .where((n) => n.isNotEmpty)
       .toSet();
   return written >= 4 && names.length * 2 < written;
+}
+
+/// Longer relative locations must not silently truncate a multi-item scan.
+bool diningAnswerIncomplete(String raw) {
+  final count = int.tryParse(
+    RegExp(r'"count"\s*:\s*(\d+)').firstMatch(raw)?.group(1) ?? '',
+  );
+  return count != null && count > (_entriesFromRaw(raw)?.length ?? 0);
 }
 
 List<Map<String, dynamic>>? _entriesFromRaw(String raw) {
@@ -373,14 +392,7 @@ int diningLocationSortIndex(String location) {
 String diningLocationLabel(String location) {
   final normalized = normalizeDiningLocation(location);
   if (normalized.isEmpty) return 'Location unknown';
-  return normalized
-      .split(' ')
-      .map(
-        (word) => word.isEmpty
-            ? word
-            : '${word[0].toUpperCase()}${word.substring(1)}',
-      )
-      .join(' ');
+  return '${normalized[0].toUpperCase()}${normalized.substring(1)}';
 }
 
 String normalizeDiningLocation(String raw) {
@@ -388,45 +400,35 @@ String normalizeDiningLocation(String raw) {
   text = text.replaceAll(RegExp(r'[_/]+'), ' ');
   text = text.replaceAll(RegExp(r'\s+'), ' ');
   text = text.replaceAll('-', ' ');
-  const aliases = {
-    'upper left': 'top left',
-    'upper center': 'top center',
-    'upper centre': 'top center',
-    'upper middle': 'top center',
-    'upper right': 'top right',
-    'top centre': 'top center',
-    'top middle': 'top center',
-    'top': 'top center',
-    'mid left': 'middle left',
-    'center left': 'middle left',
-    'centre left': 'middle left',
-    'middle centre': 'middle center',
-    'center center': 'middle center',
-    'centre centre': 'middle center',
-    'center': 'middle center',
-    'centre': 'middle center',
-    'middle': 'middle center',
-    'mid right': 'middle right',
-    'center right': 'middle right',
-    'centre right': 'middle right',
-    'lower left': 'bottom left',
-    'lower center': 'bottom center',
-    'lower centre': 'bottom center',
-    'lower right': 'bottom right',
-    'bottom centre': 'bottom center',
-    'bottom middle': 'bottom center',
-    'bottom': 'bottom center',
-  };
-  return aliases[text] ?? text;
+  text = text
+      .replaceAll('farthest', 'furthest')
+      .replaceAll('nearest', 'closest');
+  if (kDiningLocations.contains(text)) return text;
+  // Legacy frame coordinates give horizontal direction, not physical depth.
+  // Restrict this fallback to known coordinates, never arbitrary prose.
+  if (RegExp(
+    r'^(?:(?:top|upper|middle|mid|bottom|lower|center|centre) )?left$',
+  ).hasMatch(text)) {
+    return 'to your left';
+  }
+  if (RegExp(
+    r'^(?:(?:top|upper|middle|mid|bottom|lower|center|centre) )?right$',
+  ).hasMatch(text)) {
+    return 'to your right';
+  }
+  if (RegExp(
+    r'^(?:(?:top|upper|middle|bottom|lower|center|centre) )?(?:center|centre|middle)$',
+  ).hasMatch(text)) {
+    return 'in front of you';
+  }
+  return '';
 }
 
 /// Spoken description for the app's existing text-to-speech helper.
 String spokenDiningFood(DiningFood food) {
   final buffer = StringBuffer()
     ..write(food.dishName)
-    ..write(
-      food.location.isEmpty ? '.' : ' is located at the ${food.location}.',
-    );
+    ..write(food.location.isEmpty ? '.' : ' is located ${food.location}.');
 
   if (food.signText.isNotEmpty) {
     buffer.write(' The sign says ${food.signText}.');

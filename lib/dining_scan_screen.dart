@@ -277,7 +277,9 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
         );
       }
       final full = parseDiningResponse(answer, requireEvidence: true);
-      if (!diningAnswerLooped(answer)) return full;
+      if (!diningAnswerLooped(answer) && !diningAnswerIncomplete(answer)) {
+        return full;
+      }
 
       // Crowded photo: the model repeated one food instead of naming each
       // pan. Look at the left, center, and right separately.
