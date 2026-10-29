@@ -281,6 +281,47 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   }
 
   Future<DiningParseResult> _runDiningPredict(Uint8List bytes) async {
+    final result = await _runDiningScan(bytes);
+    if (!result.isValid) return result;
+    // Small print such as "Contains milk" is easy to miss in a whole-photo
+    // answer; read the card of any labelled dish that came back without
+    // allergens.
+    final foods = [...result.foods];
+    if (!foods.any(diningNeedsLabelCheck)) return result;
+    // Two reads (the photo and an 80% copy); only allergens both find are
+    // kept, so a one-off invented allergen is dropped.
+    final copy = await rescaleDiningPhoto(bytes, 0.8);
+    var checked = 0;
+    for (var i = 0; i < foods.length; i++) {
+      if (checked >= kDiningLabelCheckLimit) break;
+      if (!diningNeedsLabelCheck(foods[i])) continue;
+      checked++;
+      try {
+        final reads = <String>[];
+        for (final (image, name) in [
+          (bytes, 'dining_label.jpg'),
+          (copy, 'dining_label_small.png'),
+        ]) {
+          final raw = await _askVlmQuestion(
+            image,
+            name,
+            diningLabelPrompt(foods[i].dishName),
+            maxTokens: 200,
+          );
+          if (raw == null) break;
+          reads.add(raw);
+        }
+        if (reads.length == 2) {
+          foods[i] = diningFoodWithLabels(foods[i], reads);
+        }
+      } catch (error) {
+        debugPrint('Dining label read failed: $error');
+      }
+    }
+    return DiningParseResult(foods: foods);
+  }
+
+  Future<DiningParseResult> _runDiningScan(Uint8List bytes) async {
     try {
       final answer = await _askVlm(bytes, 'dining.jpg');
       if (answer == null) {

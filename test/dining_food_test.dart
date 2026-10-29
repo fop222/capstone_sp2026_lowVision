@@ -610,6 +610,45 @@ void main() {
       expect(byName.containsKey('Creamy Mac and Cheese'), isFalse);
     });
 
+    test('a card read fills allergens the scan missed', () {
+      final food = parseDiningResponse(
+        jsonEncode({
+          'foods': [
+            item(
+              'Apple Cranberry Brussels Sprouts Salad',
+              'closest to you',
+              'Apple Cranberry Brussels Sprouts Salad',
+            ),
+          ],
+        }),
+        requireEvidence: true,
+      ).foods.single;
+      expect(diningNeedsLabelCheck(food), isTrue);
+      final updated = diningFoodWithLabel(
+        food,
+        r'{"label_text":"Apple Cranberry Brussels Sprouts Salad\nContains milk"}',
+      );
+      expect(updated.allergens.map((c) => c.chipLabel), ['Milk (Dairy)']);
+      expect(updated.dishName, 'Apple Cranberry Brussels Sprouts Salad');
+      // Two reads must agree: an invented "Eggs, and Wheat" on one read
+      // of this card is dropped, the real milk stays.
+      expect(
+        diningFoodWithLabels(food, [
+          r'{"label_text":"Apple Cranberry Brussels Sprouts Salad\nContains: Milk, Eggs, and Wheat"}',
+          r'{"label_text":"Apple Cranberry Brussels Sprouts Salad\nContains: Milk"}',
+        ]).allergens.map((c) => c.chipLabel),
+        ['Milk (Dairy)'],
+      );
+      // Text about a different dish is not used.
+      expect(
+        diningFoodWithLabel(
+          food,
+          '{"label_text":"Chocolate Cake Contains eggs"}',
+        ).allergens,
+        isEmpty,
+      );
+    });
+
     test('every word after Contains goes to allergens', () {
       List<String> allergensOf(String sign) => parseDiningResponse(
         jsonEncode({

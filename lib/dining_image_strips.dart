@@ -28,6 +28,31 @@ const int _kMaxPhotoSide = 1280;
 /// upload. The server resizes to 768px anyway, and Vercel rejects request
 /// bodies over 4.5 MB. Returns the original bytes if it is already small or
 /// cannot be decoded.
+/// A copy of [photo] at [scale] of its size, for a second, independent read
+/// of small print. Returns the original bytes if it cannot be decoded.
+Future<Uint8List> rescaleDiningPhoto(Uint8List photo, double scale) async {
+  try {
+    final codec = await ui.instantiateImageCodec(photo);
+    final source = (await codec.getNextFrame()).image;
+    try {
+      final longest = source.width > source.height
+          ? source.width
+          : source.height;
+      final png = await _cropPng(
+        source,
+        0,
+        1,
+        maxSide: (longest * scale).round(),
+      );
+      return png ?? photo;
+    } finally {
+      source.dispose();
+    }
+  } catch (_) {
+    return photo;
+  }
+}
+
 Future<Uint8List> shrinkDiningPhoto(Uint8List photo) async {
   if (photo.lengthInBytes <= _kMaxUploadBytes) return photo;
   try {

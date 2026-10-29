@@ -1001,6 +1001,88 @@ const _shortForms = {
   'spag': 'spaghetti',
 };
 
+/// At most this many dishes get a card-text read per scan.
+const int kDiningLabelCheckLimit = 3;
+
+/// One dish's card, small print included. The full scan copied a tiny
+/// "Contains milk" line in only 3 of 6 versions of one photo; this narrow
+/// question read it in 6 of 6.
+String diningLabelPrompt(String dishName) =>
+    'Read the complete text printed on the food label or sign for '
+    '${jsonEncode(dishName)} in this photo, including any small print under '
+    'the dish name such as a Contains line. Copy it exactly. '
+    'Return JSON only: {"label_text":"..."}';
+
+/// A dish named from a card that lists no allergens: its small print may
+/// have been skipped.
+bool diningNeedsLabelCheck(DiningFood food) =>
+    food.informationSource == DiningInfoSource.sign && food.allergens.isEmpty;
+
+/// Adds allergens from a [diningLabelPrompt] answer to [food]. Only the
+/// Contains lines are used, and only when the text is about this dish.
+/// Allergens only when every read agrees. On one photo a single read
+/// invented "Contains: Milk, Eggs, and Wheat" for a card that says only
+/// "Contains milk"; a read of a resized copy did not, so the intersection
+/// keeps Milk and drops the invention.
+DiningFood diningFoodWithLabels(DiningFood food, List<String> raws) {
+  if (raws.isEmpty) return food;
+  final reads = [for (final raw in raws) diningFoodWithLabel(food, raw)];
+  final agreed = reads.first.allergens
+      .where(
+        (c) => reads.every((r) => r.allergens.any((x) => x.label == c.label)),
+      )
+      .toList();
+  return DiningFood(
+    dishName: food.dishName,
+    location: food.location,
+    confidence: food.confidence,
+    signText: food.signText,
+    allergens: agreed,
+    dietaryPreferences: food.dietaryPreferences,
+    informationSource: food.informationSource,
+    warning: food.warning,
+    signPartial: food.signPartial,
+  );
+}
+
+DiningFood diningFoodWithLabel(DiningFood food, String raw) {
+  var label = '';
+  try {
+    final decoded = jsonDecode(_extractJsonObject(raw) ?? '');
+    if (decoded is Map) label = _stringValue(decoded['label_text']);
+  } catch (_) {
+    return food;
+  }
+  final dishNouns = _nameWords(food.dishName).where(_isFoodNoun).toSet();
+  final labelWords = _nameWords(label).toSet();
+  if (dishNouns.isNotEmpty && !dishNouns.any(labelWords.contains)) return food;
+  final declarations = _allergenDeclarations(label);
+  if (declarations.isEmpty) return food;
+  final updated = _foodFromMap({
+    'dish_name': food.dishName,
+    'location': food.location,
+    'confidence': food.confidence,
+    'sign_text': '${food.signText}\n${declarations.join('\n')}'.trim(),
+    'information_source': 'sign',
+  });
+  if (updated == null) return food;
+  return DiningFood(
+    dishName: food.dishName,
+    location: food.location,
+    confidence: food.confidence,
+    signText: food.signText,
+    allergens: [
+      ...food.allergens,
+      for (final c in updated.allergens)
+        if (!food.allergens.any((x) => x.label == c.label)) c,
+    ],
+    dietaryPreferences: food.dietaryPreferences,
+    informationSource: food.informationSource,
+    warning: food.warning,
+    signPartial: food.signPartial,
+  );
+}
+
 DiningFood _withClaimsFrom(DiningFood keep, DiningFood from) {
   List<DiningClaim> union(List<DiningClaim> a, List<DiningClaim> b) => [
     ...a,
