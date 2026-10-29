@@ -48,7 +48,7 @@ Rules:
 - location describes distance from the viewer, never image coordinates. When perspective clearly shows depth, use: closest to you on your left, closest to you, closest to you on your right, farther from you on your left, farther from you, farther from you on your right, furthest from you on your left, furthest from you, or furthest from you on your right.
 - For one row of pans or dispensers, or whenever depth is unclear, use: to your left, in front of you, or to your right. Never infer distance just from an item's vertical position in the image. Do not use top, bottom, center, or middle-right. Return location "" if uncertain.
 - Prioritize prominent items that the user can clearly distinguish. Skip insignificant objects and distant foods too small to identify. Several items can share a location.
-- sign_text is only text you can actually read on that dish's own card or label, at most 12 words (its name and any Contains line); otherwise "". Never copy a banner, a legend of allergen icons, or another dish's card.
+- sign_text is only text you can actually read on that dish's own card or label, at most 12 words (its name and any Contains line); otherwise "". Read the small print under the dish name too: copy a line such as "Contains milk" exactly. Never copy a banner, a legend of allergen icons, or another dish's card.
 - information_source is "sign" with confidence "high" only when you read the dish name on a sign; then add "allergens" and "dietary_preferences" lists with only the words on the sign.
 - dish_name contains only the dish name, never dietary tags or allergen declarations. Put Vegetarian/Veg, Vegan, Pescatarian, Gluten-Free/GF, Dairy-Free, Keto, Low-Carb, Low-Sodium, Halal, and Kosher in dietary_preferences. Put explicitly printed allergen declarations in allergens. If the sign does not state allergens, return an empty allergens list; do not infer allergens from the dish name or appearance.
 - Otherwise information_source is "visual estimate" with confidence "medium" or "low". Do not invent exact ingredients.
@@ -1699,14 +1699,63 @@ List<DiningClaim> _allergenClaims({
           ).hasMatch(declaration) &&
           _aliasPattern(aliases).hasMatch(declaration),
     );
+    // Show the printed word when it is milk: "Milk (Dairy)".
+    final printed =
+        canonical == 'Dairy' &&
+            _allergenDeclarations(
+              signText,
+            ).any((d) => RegExp(r'\bmilk\b', caseSensitive: false).hasMatch(d))
+        ? 'Milk (Dairy)'
+        : canonical;
     claims.add(
       DiningClaim(
-        label: mayContain ? 'May contain $canonical' : canonical,
+        label: mayContain ? 'May contain $printed' : printed,
         certainty: DiningCertainty.confirmed,
       ),
     );
   }
+  // Anything else a sign says the dish contains is an allergen too
+  // ("Contains: Coconut, Gluten"), even outside the usual list.
+  if (source == DiningInfoSource.sign) {
+    for (final word in _declaredWords(signText)) {
+      final parts = word.split(' ');
+      if (parts.any(
+            (w) =>
+                _canonicalAllergen(w) != null || _canonicalDietary(w) != null,
+          ) ||
+          _canonicalAllergen(word) != null ||
+          _canonicalDietary(word) != null ||
+          RegExp(
+            r'^(traces?|of|may|the)$',
+            caseSensitive: false,
+          ).hasMatch(parts.first) ||
+          !seen.add(word.toLowerCase())) {
+        continue;
+      }
+      claims.add(
+        DiningClaim(label: word, certainty: DiningCertainty.confirmed),
+      );
+    }
+  }
   return claims;
+}
+
+/// Words after "Contains" on a sign, one per item: "Contains: Coconut,
+/// Gluten & Celery" gives Coconut, Gluten, Celery.
+List<String> _declaredWords(String signText) {
+  final out = <String>[];
+  for (final m in RegExp(
+    r'\b(?:may\s+)?contains?\b\s*:?\s*([^\n;|.]+)',
+    caseSensitive: false,
+  ).allMatches(signText)) {
+    for (final raw in m.group(1)!.split(RegExp(r',|/|&|\band\b|\s{2,}'))) {
+      final word = raw.replaceAll(RegExp(r'[^A-Za-z \-]'), '').trim();
+      final words = word.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+      if (word.length < 3 || words.length > 3) continue;
+      out.add(word[0].toUpperCase() + word.substring(1).toLowerCase());
+    }
+  }
+  return out;
 }
 
 List<DiningClaim> _dietaryClaims({

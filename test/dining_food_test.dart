@@ -610,6 +610,42 @@ void main() {
       expect(byName.containsKey('Creamy Mac and Cheese'), isFalse);
     });
 
+    test('every word after Contains goes to allergens', () {
+      List<String> allergensOf(String sign) => parseDiningResponse(
+        jsonEncode({
+          'foods': [
+            item(
+              sign.split(String.fromCharCode(10)).first,
+              'closest to you',
+              sign,
+            ),
+          ],
+        }),
+        requireEvidence: true,
+      ).foods.single.allergens.map((c) => c.chipLabel).toList();
+
+      // Small print on the Brussels sprouts card, no colon.
+      expect(
+        allergensOf('Apple Cranberry Brussels Sprouts Salad Contains milk'),
+        ['Milk (Dairy)'],
+      );
+      expect(
+        allergensOf(
+          'Curry' +
+              String.fromCharCode(10) +
+              'Contains: Milk (Dairy), Coconut, Soy',
+        ),
+        unorderedEquals(['Milk (Dairy)', 'Soy', 'Coconut']),
+      );
+      expect(
+        allergensOf(
+          'Pasta' + String.fromCharCode(10) + 'Contains: Wheat & Celery',
+        ),
+        unorderedEquals(['Wheat', 'Celery']),
+      );
+      expect(allergensOf('Salad (Vegan, GF)'), isEmpty);
+    });
+
     test('calories and prices are not part of a dish name', () {
       expect(
         names([
