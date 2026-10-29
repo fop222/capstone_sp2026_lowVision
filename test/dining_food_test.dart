@@ -610,6 +610,29 @@ void main() {
       expect(byName.containsKey('Creamy Mac and Cheese'), isFalse);
     });
 
+    test('calories and prices are not part of a dish name', () {
+      expect(
+        names([
+          item(
+            'Wild Rice Pilaf Cal 170 Eln',
+            'to your left',
+            'Wild Rice Pilaf Cal 170 Eln',
+          ),
+          item('Chicken Noodle Soup 210 Calories', 'in front of you'),
+          item('BLT Wrap \$6.99', 'to your right'),
+          item('Calzone', 'to your right'),
+          item('7 Layer Dip', 'to your left'),
+        ]),
+        unorderedEquals([
+          'Wild Rice Pilaf',
+          'Chicken Noodle Soup',
+          'BLT Wrap',
+          'Calzone',
+          '7 Layer Dip',
+        ]),
+      );
+    });
+
     test('the same tray named two ways is listed once', () {
       expect(
         names([

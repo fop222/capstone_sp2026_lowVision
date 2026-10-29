@@ -968,6 +968,23 @@ Map<String, dynamic>? _withCardSignOnly(Map<String, dynamic> entry) {
   };
 }
 
+/// Calorie and price text printed on a card ("Wild Rice Pilaf Cal 170",
+/// "170 kcal", "$3.99"). Everything from it to the end is dropped,
+/// including OCR noise that follows ("Cal 170 Eln").
+final _nutritionText = RegExp(
+  r'\b\d+\s*(?:k?cal(?:orie)?s?|kcal)\b|\b(?:k?cal(?:orie)?s?|kcal)\s*[:.]?\s*\d+|\$\s*\d+(?:[.,]\d{2})?|\b\d+(?:[.,]\d{2})?\s*\$',
+  caseSensitive: false,
+);
+
+String _withoutNutrition(String name) {
+  final cut = _nutritionText.firstMatch(name);
+  if (cut == null) return name;
+  return name
+      .substring(0, cut.start)
+      .replaceAll(RegExp(r'[\s,:;|/(\[–—-]+$'), '')
+      .trim();
+}
+
 /// Lowercase words of a dish name, with a plural "s" dropped.
 List<String> _nameWords(String name) => [
   for (final w in name.toLowerCase().split(RegExp(r'[^a-z0-9À-￿]+')))
@@ -1466,6 +1483,8 @@ DiningFood? _foodFromMap(Map<String, dynamic> map) {
     warning = 'Not enough information to identify this food.';
   }
 
+  dish = _withoutNutrition(dish);
+  if (dish.isEmpty) return null;
   if (dish.length > 80) dish = '${dish.substring(0, 77).trim()}...';
 
   return DiningFood(
