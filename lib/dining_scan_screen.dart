@@ -290,7 +290,12 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     if (!foods.any(diningNeedsLabelCheck)) return result;
     // Two reads (the photo and an 80% copy); only allergens both find are
     // kept, so a one-off invented allergen is dropped.
-    final copy = await rescaleDiningPhoto(bytes, 0.8);
+    final copies = [
+      (bytes, 'dining_label.jpg'),
+      (await rescaleDiningPhoto(bytes, 0.8), 'dining_label_small.png'),
+      // Only used to break a tie between the first two reads.
+      (await rescaleDiningPhoto(bytes, 0.6), 'dining_label_tie.png'),
+    ];
     var checked = 0;
     for (var i = 0; i < foods.length; i++) {
       if (checked >= kDiningLabelCheckLimit) break;
@@ -298,20 +303,26 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       checked++;
       try {
         final reads = <String>[];
-        for (final (image, name) in [
-          (bytes, 'dining_label.jpg'),
-          (copy, 'dining_label_small.png'),
-        ]) {
-          final raw = await _askVlmQuestion(
-            image,
-            name,
-            diningLabelPrompt(foods[i].dishName),
-            maxTokens: 200,
-          );
-          if (raw == null) break;
-          reads.add(raw);
+        for (final (image, name) in copies) {
+          // Two reads that agree are enough; a third only breaks a tie or
+          // replaces a failed read.
+          if (reads.length == 2 &&
+              diningFoodWithLabels(foods[i], reads).allergens.isNotEmpty) {
+            break;
+          }
+          try {
+            final raw = await _askVlmQuestion(
+              image,
+              name,
+              diningLabelPrompt(foods[i].dishName),
+              maxTokens: 200,
+            );
+            if (raw != null) reads.add(raw);
+          } catch (error) {
+            debugPrint('Dining label read failed: $error');
+          }
         }
-        if (reads.length == 2) {
+        if (reads.length >= 2) {
           foods[i] = diningFoodWithLabels(foods[i], reads);
         }
       } catch (error) {

@@ -1027,11 +1027,18 @@ bool diningNeedsLabelCheck(DiningFood food) =>
 DiningFood diningFoodWithLabels(DiningFood food, List<String> raws) {
   if (raws.isEmpty) return food;
   final reads = [for (final raw in raws) diningFoodWithLabel(food, raw)];
-  final agreed = reads.first.allergens
-      .where(
-        (c) => reads.every((r) => r.allergens.any((x) => x.label == c.label)),
-      )
-      .toList();
+  // Kept when more than half of the reads found it: both of two, or two of
+  // three when a third read breaks a disagreement.
+  final agreed = <DiningClaim>[];
+  for (final read in reads) {
+    for (final c in read.allergens) {
+      if (agreed.any((x) => x.label == c.label)) continue;
+      final votes = reads
+          .where((r) => r.allergens.any((x) => x.label == c.label))
+          .length;
+      if (votes * 2 > reads.length) agreed.add(c);
+    }
+  }
   return DiningFood(
     dishName: food.dishName,
     location: food.location,

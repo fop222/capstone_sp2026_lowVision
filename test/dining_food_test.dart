@@ -639,6 +639,15 @@ void main() {
         ]).allergens.map((c) => c.chipLabel),
         ['Milk (Dairy)'],
       );
+      // Two reads that disagree get a third; two of three is enough.
+      expect(
+        diningFoodWithLabels(food, [
+          r'{"label_text":"Apple Cranberry Brussels Sprouts Salad\nContains milk"}',
+          r'{"label_text":"Apple Cranberry Brussels Sprouts Salad"}',
+          r'{"label_text":"Apple Cranberry Brussels Sprouts Salad\nContains: Milk, Soy"}',
+        ]).allergens.map((c) => c.chipLabel),
+        ['Milk (Dairy)'],
+      );
       // Text about a different dish is not used.
       expect(
         diningFoodWithLabel(
