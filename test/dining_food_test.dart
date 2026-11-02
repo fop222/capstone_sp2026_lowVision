@@ -717,6 +717,48 @@ void main() {
       );
     });
 
+    test('a card OCR read wins over the guess about the pan', () {
+      const ocr =
+          'Buttermilk Cornbread\nCal 200\n'
+          'Contains: milk; eggs, wheat, soy bean, gluten\nBnkeluiik COLUpLGgq';
+      final food = parseDiningResponse(
+        jsonEncode({
+          'foods': [
+            {
+              ...item('tofu', 'closest to you'),
+              'visible_food': 'tofu',
+              'sign_text':
+                  'Buttermilk Cornbread\nContains: milk, eggs, wheat, soy bean, gluten',
+              'information_source': 'visual estimate',
+            },
+          ],
+        }),
+        requireEvidence: true,
+        ocrText: ocr,
+      ).foods.single;
+      expect(food.dishName, 'Buttermilk Cornbread');
+      expect(
+        food.allergens.map((c) => c.chipLabel),
+        containsAll(['Milk (Dairy)', 'Eggs', 'Wheat']),
+      );
+    });
+
+    test('one item that joins two cards becomes two items', () {
+      final names = parseDiningResponse(
+        jsonEncode({
+          'foods': [
+            item(
+              'Falafel Roasted Brussels Sprouts',
+              'closest to you on your left',
+            ),
+          ],
+        }),
+        requireEvidence: true,
+        ocrText: 'Falafel\nRoasted Brussels Sprouts\nCal 60',
+      ).foods.map((f) => f.dishName);
+      expect(names, unorderedEquals(['Falafel', 'Roasted Brussels Sprouts']));
+    });
+
     test('the same tray named two ways is listed once', () {
       expect(
         names([

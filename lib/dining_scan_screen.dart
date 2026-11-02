@@ -261,18 +261,26 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     if (mounted) setState(() => _readingLabels = true);
     final client = http.Client();
     try {
-      final request = http.MultipartRequest('POST', ocrMultipartUri())
-        ..files.add(
-          http.MultipartFile.fromBytes('image', bytes, filename: filename),
-        );
-      final response = await client
-          .send(request)
-          .then(http.Response.fromStream)
-          .timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200) return '';
-      return diningOcrText(jsonDecode(response.body));
-    } catch (error) {
-      debugPrint('Dining label OCR unavailable: $error');
+      // One retry: Vercel briefly answered 403 to a label OCR request during
+      // testing, and without the card text a cornbread tray was called tofu.
+      for (var attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) await Future<void>.delayed(const Duration(seconds: 1));
+        try {
+          final request = http.MultipartRequest('POST', ocrMultipartUri())
+            ..files.add(
+              http.MultipartFile.fromBytes('image', bytes, filename: filename),
+            );
+          final response = await client
+              .send(request)
+              .then(http.Response.fromStream)
+              .timeout(const Duration(seconds: 20));
+          if (response.statusCode == 200) {
+            return diningOcrText(jsonDecode(response.body));
+          }
+        } catch (error) {
+          debugPrint('Dining label OCR unavailable: $error');
+        }
+      }
       return '';
     } finally {
       client.close();
@@ -342,7 +350,13 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
               'Lumio could not analyze this photo. Please try again or ask dining staff.',
         );
       }
-      final full = parseDiningResponse(answer, requireEvidence: true);
+      // Strips overwrite _lastLabels; keep the whole photo's OCR.
+      final fullLabels = _lastLabels;
+      final full = parseDiningResponse(
+        answer,
+        requireEvidence: true,
+        ocrText: fullLabels,
+      );
 
       // Drink station: brand labels are logos the regular pass will not
       // name, so ask about the drinks directly.
@@ -429,7 +443,11 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
           debugPrint('Dining strip ${strip.column} failed: $error');
         }
       }
-      final closer = parseDiningStrips(answers, requireEvidence: true);
+      final closer = parseDiningStrips(
+        answers,
+        requireEvidence: true,
+        ocrText: fullLabels,
+      );
       // Strips read cards more reliably; prefer them unless they found less.
       return closer.foods.length >= full.foods.length ? closer : full;
     } catch (error) {

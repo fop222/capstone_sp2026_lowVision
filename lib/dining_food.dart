@@ -195,15 +195,24 @@ const String kDiningParseError =
 
 /// Parses and validates a VLM dining answer. Invalid entries are dropped.
 /// Allergen and dietary claims are re-labeled before anything is shown.
+///
+/// [ocrText] is the label OCR of the same photo. Card titles found in it
+/// confirm a dish name, rename a dish whose card was read but misnamed, and
+/// split one item that joined two cards.
 DiningParseResult parseDiningResponse(
   String raw, {
   bool requireEvidence = false,
+  String ocrText = '',
 }) {
   final entries = _entriesFromRaw(raw);
   if (entries == null) {
     return const DiningParseResult(foods: [], error: kDiningParseError);
   }
-  return _resultFromEntries(entries, requireEvidence: requireEvidence);
+  return _resultFromEntries(
+    entries,
+    requireEvidence: requireEvidence,
+    ocrTitles: diningOcrTitles(ocrText),
+  );
 }
 
 /// Left, center, and right strips of one photo, as sent by the scan screen
@@ -212,6 +221,7 @@ DiningParseResult parseDiningResponse(
 DiningParseResult parseDiningStrips(
   List<({String column, String raw})> strips, {
   bool requireEvidence = false,
+  String ocrText = '',
 }) {
   final entries = <Map<String, dynamic>>[];
   for (final strip in strips) {
@@ -235,7 +245,11 @@ DiningParseResult parseDiningStrips(
       });
     }
   }
-  return _resultFromEntries(entries, requireEvidence: requireEvidence);
+  return _resultFromEntries(
+    entries,
+    requireEvidence: requireEvidence,
+    ocrTitles: diningOcrTitles(ocrText),
+  );
 }
 
 /// A focused pass for drink stations. The general dining prompt missed brand
@@ -457,6 +471,7 @@ DiningParseResult _resultFromEntries(
   List<Map<String, dynamic>> entries, {
   bool requireEvidence = false,
   bool mergeKinds = true,
+  List<String> ocrTitles = const [],
 }) {
   // Checked on the raw answer: the shared-sign rule below can clear the
   // copied sign text and hide that the name was OCR noise.
@@ -464,9 +479,11 @@ DiningParseResult _resultFromEntries(
     for (final entry in entries)
       if (!mergeKinds)
         entry
-      else if (_withCardSignOnly(entry) case final card?
-          when !_isUnreadableLabel(card))
-        _withVisibleFood(_withoutNoiseSign(card)),
+      else
+        for (final split in _splitJoinedCards(entry, ocrTitles))
+          if (_withCardSignOnly(_withOcrTitle(split, ocrTitles))
+              case final card? when !_isUnreadableLabel(card))
+            _withVisibleFood(_withoutNoiseSign(card)),
   ]);
 
   // The small VLM often loops, repeating one food until the token limit.
@@ -573,6 +590,9 @@ const _foodWords = {
   'green',
   'frie',
   'bun',
+  'sprout',
+  'brussel',
+  'cornbread',
   'sprite',
   'coke',
   'cola',
@@ -891,7 +911,113 @@ const _cookingWords = {
 bool _isFoodNoun(String w) =>
     _foodWords.contains(w) && !_cookingWords.contains(w);
 
+/// Lines of label OCR that read like one dish card's title: a few words
+/// with a food word, no colon ("Buttermilk Cornbread", "Falafel",
+/// "Roasted Brussels Sprouts"), calories removed.
+List<String> diningOcrTitles(String ocrText) {
+  final titles = <String>[];
+  for (final raw in ocrText.split('\n')) {
+    final line = _withoutNutrition(raw.trim());
+    if (line.isEmpty || line.contains(':') || diningBannerLine.hasMatch(line)) {
+      continue;
+    }
+    final words = _nameWords(line);
+    if (words.isEmpty || words.length > 6 || _isMenuHeading(words)) continue;
+    final looksLikeFood = words.any(
+      (w) => _foodWords.any((f) => f.length >= 3 && w.contains(f)),
+    );
+    if (looksLikeFood) titles.add(line);
+  }
+  return titles;
+}
+
+String _titleKey(String text) =>
+    text.toLowerCase().replaceAll(RegExp(r'[^a-z]+'), '');
+
+/// True when [name] is [title] or contains it, allowing a little OCR noise.
+bool _matchesTitle(String name, String title) {
+  final n = _titleKey(name), t = _titleKey(title);
+  if (t.length < 4 || n.isEmpty) return false;
+  if (n.contains(t) || (n.length >= 4 && t.contains(n))) return true;
+  return n.length >= 8 && _editDistance(n, t) <= (t.length ~/ 8).clamp(1, 3);
+}
+
+int _editDistance(String a, String b) {
+  var prev = List<int>.generate(b.length + 1, (i) => i);
+  for (var i = 1; i <= a.length; i++) {
+    final cur = List<int>.filled(b.length + 1, 0)..[0] = i;
+    for (var j = 1; j <= b.length; j++) {
+      final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+      final best = prev[j] + 1 < cur[j - 1] + 1 ? prev[j] + 1 : cur[j - 1] + 1;
+      cur[j] = best < prev[j - 1] + cost ? best : prev[j - 1] + cost;
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/// "Falafel Roasted Brussels Sprouts" when OCR saw two cards, "Falafel" and
+/// "Roasted Brussels Sprouts": two items, not one.
+List<Map<String, dynamic>> _splitJoinedCards(
+  Map<String, dynamic> entry,
+  List<String> titles,
+) {
+  final key = _titleKey(_stringValue(entry['dish_name']));
+  final found = <({int at, String title})>[];
+  for (final title in titles) {
+    final t = _titleKey(title);
+    final at = t.length >= 4 ? key.indexOf(t) : -1;
+    if (at >= 0 && !found.any((f) => _titleKey(f.title) == t)) {
+      found.add((at: at, title: title));
+    }
+  }
+  if (found.length < 2) return [entry];
+  final covered = found.fold<int>(0, (n, f) => n + _titleKey(f.title).length);
+  if (covered * 10 < key.length * 8) return [entry];
+  found.sort((a, b) => a.at.compareTo(b.at));
+  final id = _stringValue(entry['item_id']);
+  return [
+    for (var i = 0; i < found.length; i++)
+      {
+        ...entry,
+        'item_id': '$id#$i',
+        'dish_name': found[i].title,
+        'visible_food': '',
+        'sign_text': found[i].title,
+        'information_source': 'sign',
+      },
+  ];
+}
+
+/// A name that matches a card OCR read is confirmed. A name that does not,
+/// on an item whose sign text contains such a card, takes the card's title
+/// ("tofu" under a card reading "Buttermilk Cornbread").
+Map<String, dynamic> _withOcrTitle(
+  Map<String, dynamic> entry,
+  List<String> titles,
+) {
+  if (titles.isEmpty) return entry;
+  final name = _stringValue(entry['dish_name']);
+  if (titles.any((t) => _matchesTitle(name, t))) {
+    return {...entry, 'ocr_verified': true};
+  }
+  final sign = _stringValue(entry['sign_text']);
+  for (final title in titles) {
+    if (_titleKey(sign).contains(_titleKey(title))) {
+      return {
+        ...entry,
+        'dish_name': title,
+        'information_source': 'sign',
+        'ocr_verified': true,
+      };
+    }
+  }
+  return entry;
+}
+
 Map<String, dynamic> _withVisibleFood(Map<String, dynamic> entry) {
+  // A card OCR read outranks the model's guess about the pan.
+  if (entry['ocr_verified'] == true) return entry;
   final seen = _nameWords(
     _stringValue(entry['visible_food']),
   ).where(_isFoodNoun).toSet();
