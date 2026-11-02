@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'app_tts.dart';
 import 'dining_food.dart';
+import 'dining_history.dart';
 import 'dining_image_strips.dart';
 import 'dining_ocr.dart';
 import 'dining_results_screen.dart';
@@ -214,11 +215,16 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
         ? '1 food'
         : '${result.foods.length} foods';
     unawaited(_speak('Found $count.'));
+    // Saved in the background; a failed save never blocks the results.
+    final scanId = saveDiningScan(result.foods);
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            DiningResultsScreen(foods: result.foods, photoBytes: bytes),
+        builder: (_) => DiningResultsScreen(
+          foods: result.foods,
+          photoBytes: bytes,
+          scanId: scanId,
+        ),
       ),
     );
     if (mounted) await _restartCamera();

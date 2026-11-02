@@ -5,15 +5,28 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import 'app_tts.dart';
 import 'dining_food.dart';
+import 'dining_report_screen.dart';
 import 'grocery_ui.dart';
 import 'recipe_widgets.dart';
 
 /// Lists every food from one scan, in image order, then opens details.
 class DiningResultsScreen extends StatefulWidget {
-  const DiningResultsScreen({super.key, required this.foods, this.photoBytes});
+  const DiningResultsScreen({
+    super.key,
+    required this.foods,
+    this.photoBytes,
+    this.scanId,
+    this.scannedAt,
+  });
 
   final List<DiningFood> foods;
   final Uint8List? photoBytes;
+
+  /// The saved scan's id (or null if it was not saved), attached to reports.
+  final Future<String?>? scanId;
+
+  /// Set when opened from scan history: when the scan was made.
+  final String? scannedAt;
 
   @override
   State<DiningResultsScreen> createState() => _DiningResultsScreenState();
@@ -22,6 +35,9 @@ class DiningResultsScreen extends StatefulWidget {
 class _DiningResultsScreenState extends State<DiningResultsScreen> {
   final FlutterTts _tts = FlutterTts();
   late final List<DiningFood> _foods = sortDiningFoods(widget.foods);
+
+  String get _backLabel =>
+      widget.scannedAt == null ? 'Scan another photo' : 'Back to scan history';
 
   @override
   void dispose() {
@@ -42,7 +58,8 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
   void _openFood(DiningFood food) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => DiningFoodDetailScreen(food: food),
+        builder: (_) =>
+            DiningFoodDetailScreen(food: food, scanId: widget.scanId),
       ),
     );
   }
@@ -78,6 +95,18 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                       ),
                     ),
                   ),
+                  if (widget.scannedAt != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Scanned ${widget.scannedAt}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        height: 1.35,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(
                     'When distance is clear, the closest items are listed first. Tap an item for allergens and dietary details.',
@@ -132,7 +161,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                   const SizedBox(height: 8),
                   Semantics(
                     button: true,
-                    label: 'Scan another photo',
+                    label: _backLabel,
                     excludeSemantics: true,
                     child: OutlinedButton(
                       onPressed: () => Navigator.of(context).pop(),
@@ -151,7 +180,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      child: const Text('Scan another photo'),
+                      child: Text(_backLabel),
                     ),
                   ),
                 ],
@@ -165,9 +194,10 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
 }
 
 class DiningFoodDetailScreen extends StatefulWidget {
-  const DiningFoodDetailScreen({super.key, required this.food});
+  const DiningFoodDetailScreen({super.key, required this.food, this.scanId});
 
   final DiningFood food;
+  final Future<String?>? scanId;
 
   @override
   State<DiningFoodDetailScreen> createState() => _DiningFoodDetailScreenState();
@@ -190,6 +220,19 @@ class _DiningFoodDetailScreenState extends State<DiningFoodDetailScreen> {
     } catch (error) {
       debugPrint('Dining TTS unavailable: $error');
     }
+  }
+
+  Future<void> _openReport() async {
+    // Not awaited: with no speech engine the call may never answer.
+    _tts.stop().catchError((Object error) {
+      debugPrint('Dining TTS unavailable: $error');
+    });
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            DiningReportScreen(food: widget.food, scanId: widget.scanId),
+      ),
+    );
   }
 
   @override
@@ -236,6 +279,33 @@ class _DiningFoodDetailScreenState extends State<DiningFoodDetailScreen> {
                           SizedBox(width: 10),
                           Text('Hear this food'),
                         ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Semantics(
+                    button: true,
+                    label: 'Report incorrect result',
+                    hint: 'Tell Lumio this food was identified wrongly',
+                    excludeSemantics: true,
+                    child: OutlinedButton.icon(
+                      onPressed: _openReport,
+                      icon: const Icon(Icons.flag_outlined, size: 28),
+                      label: const Text('Report incorrect result'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: BorderSide(
+                          color: kBrandPurpleLight.withValues(alpha: 0.8),
+                          width: 2,
+                        ),
+                        minimumSize: const Size.fromHeight(56),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),

@@ -76,8 +76,22 @@ enum DiningInfoSource { sign, visualEstimate, unknown }
 class DiningClaim {
   const DiningClaim({required this.label, required this.certainty});
 
+  /// Reads a claim saved by [toJson]. An unrecognized certainty is unknown.
+  factory DiningClaim.fromJson(Map<String, dynamic> json) => DiningClaim(
+    label: '${json['label'] ?? ''}',
+    certainty: DiningCertainty.values.firstWhere(
+      (value) => value.name == json['certainty'],
+      orElse: () => DiningCertainty.unknown,
+    ),
+  );
+
   final String label;
   final DiningCertainty certainty;
+
+  Map<String, dynamic> toJson() => {
+    'label': label,
+    'certainty': certainty.name,
+  };
 
   String get certaintyLabel {
     switch (certainty) {
@@ -118,6 +132,32 @@ class DiningFood {
     required this.signPartial,
   });
 
+  /// Reads a food saved by [toJson] (scan history). Missing fields fall back
+  /// to empty or unknown so an old or partial row still opens.
+  factory DiningFood.fromJson(Map<String, dynamic> json) {
+    List<DiningClaim> claims(Object? raw) => raw is List
+        ? [
+            for (final item in raw)
+              if (item is Map)
+                DiningClaim.fromJson(Map<String, dynamic>.from(item)),
+          ]
+        : const [];
+    return DiningFood(
+      dishName: '${json['dish_name'] ?? ''}',
+      location: '${json['location'] ?? ''}',
+      confidence: '${json['confidence'] ?? 'medium'}',
+      signText: '${json['sign_text'] ?? ''}',
+      allergens: claims(json['allergens']),
+      dietaryPreferences: claims(json['dietary_preferences']),
+      informationSource: DiningInfoSource.values.firstWhere(
+        (value) => value.name == json['information_source'],
+        orElse: () => DiningInfoSource.unknown,
+      ),
+      warning: '${json['warning'] ?? ''}',
+      signPartial: json['sign_partial'] == true,
+    );
+  }
+
   final String dishName;
   final String location;
   final String confidence;
@@ -127,6 +167,20 @@ class DiningFood {
   final DiningInfoSource informationSource;
   final String warning;
   final bool signPartial;
+
+  Map<String, dynamic> toJson() => {
+    'dish_name': dishName,
+    'location': location,
+    'confidence': confidence,
+    'sign_text': signText,
+    'allergens': [for (final claim in allergens) claim.toJson()],
+    'dietary_preferences': [
+      for (final claim in dietaryPreferences) claim.toJson(),
+    ],
+    'information_source': informationSource.name,
+    'warning': warning,
+    'sign_partial': signPartial,
+  };
 
   String get locationLabel => diningLocationLabel(location);
 
@@ -998,21 +1052,61 @@ Map<String, dynamic> _withOcrTitle(
 ) {
   if (titles.isEmpty) return entry;
   final name = _stringValue(entry['dish_name']);
-  if (titles.any((t) => _matchesTitle(name, t))) {
-    return {...entry, 'ocr_verified': true};
-  }
   final sign = _stringValue(entry['sign_text']);
+  for (final title in titles) {
+    if (_matchesTitle(name, title)) {
+      final n = _titleKey(name), t = _titleKey(title);
+      return {
+        ...entry,
+        // A strip cut the card ("Sprouts" for "Roasted Brussels Sprouts"):
+        // the whole photo's read has the full name.
+        if (n != t && t.contains(n)) 'dish_name': title,
+        'sign_text': _oneCardOf(sign, title, titles),
+        'ocr_verified': true,
+      };
+    }
+  }
   for (final title in titles) {
     if (_titleKey(sign).contains(_titleKey(title))) {
       return {
         ...entry,
         'dish_name': title,
+        'sign_text': _oneCardOf(sign, title, titles),
         'information_source': 'sign',
         'ocr_verified': true,
       };
     }
   }
   return entry;
+}
+
+/// The lines of [sign] that belong to [title]'s card. The model copied
+/// "Falafel / Roasted Brussels Sprouts / Cal 60" as the falafel's sign, and
+/// the name built from it swallowed the Brussels sprouts item.
+String _oneCardOf(String sign, String title, List<String> titles) {
+  final others = [
+    for (final t in titles)
+      if (_titleKey(t) != _titleKey(title)) _titleKey(t),
+  ];
+  if (others.isEmpty) return sign;
+  final lines = sign.split('\n');
+  bool isOther(String line) {
+    final key = _titleKey(line);
+    return key.isNotEmpty &&
+        others.any((o) => o.length >= 4 && (key == o || key.contains(o)));
+  }
+
+  if (!lines.any(isOther)) return sign;
+  final start = lines.indexWhere(
+    (line) => _titleKey(line).contains(_titleKey(title)),
+  );
+  if (start < 0) return lines.where((line) => !isOther(line)).join('\n');
+  final card = <String>[];
+  for (final line in lines.skip(start)) {
+    if (card.isNotEmpty && isOther(line)) break;
+    card.add(line);
+  }
+  return card.join('\n');
 }
 
 Map<String, dynamic> _withVisibleFood(Map<String, dynamic> entry) {
@@ -1636,7 +1730,11 @@ DiningFood? _foodFromMap(Map<String, dynamic> map) {
     warning = _append(warning, 'No readable sign text was returned.');
   }
 
-  if (source == DiningInfoSource.sign && !signPartial) {
+  // A name checked against a card OCR read stays; the sign text may be a
+  // strip's clipped copy of the card ("sels Sprouts / al 60").
+  if (source == DiningInfoSource.sign &&
+      !signPartial &&
+      map['ocr_verified'] != true) {
     final signedName = _dishNameFromSign(signText);
     if (signedName != null) dish = signedName;
   }

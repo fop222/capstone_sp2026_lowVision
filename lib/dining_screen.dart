@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_drawer.dart';
+import 'dining_history_screen.dart';
 import 'dining_scan_screen.dart';
 import 'grocery_ui.dart';
 
@@ -12,6 +13,12 @@ class DiningScreen extends StatelessWidget {
     Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const DiningScanScreen()));
+  }
+
+  void _openHistory(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const DiningHistoryScreen()),
+    );
   }
 
   @override
@@ -66,6 +73,44 @@ class DiningScreen extends StatelessWidget {
                             Flexible(
                               child: Text(
                                 'Scan Buffet / Food',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Semantics(
+                      button: true,
+                      label: 'See scan history',
+                      hint: 'Recent scans with the time each was made',
+                      excludeSemantics: true,
+                      child: OutlinedButton(
+                        onPressed: () => _openHistory(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(
+                            color: kBrandPurpleLight.withValues(alpha: 0.8),
+                            width: 2,
+                          ),
+                          minimumSize: const Size.fromHeight(56),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          textStyle: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.history_rounded, size: 28),
+                            SizedBox(width: 12),
+                            Flexible(
+                              child: Text(
+                                'See scan history',
                                 textAlign: TextAlign.center,
                               ),
                             ),

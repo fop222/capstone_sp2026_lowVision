@@ -759,6 +759,51 @@ void main() {
       expect(names, unorderedEquals(['Falafel', 'Roasted Brussels Sprouts']));
     });
 
+    test('a sign copied from two cards does not join their names', () {
+      // The live answer for this photo: both cards in the falafel's sign.
+      final names = parseDiningResponse(
+        jsonEncode({
+          'foods': [
+            item(
+              'Falafel',
+              'closest to you on your left',
+              'Falafel\nRoasted Brussels Sprouts\nCal 60',
+            ),
+            item(
+              'Roasted Brussels Sprouts',
+              'closest to you on your right',
+              'Roasted Brussels Sprouts\nCal 60',
+            ),
+          ],
+        }),
+        requireEvidence: true,
+        ocrText: 'Falafel\nRoasted Brussels Sprouts\nCal 60',
+      ).foods.map((f) => f.dishName);
+      expect(names, ['Falafel', 'Roasted Brussels Sprouts']);
+    });
+
+    test('a strip that cut a card takes the full card name', () {
+      final names = parseDiningStrips(
+        [
+          (
+            column: 'left',
+            raw: jsonEncode({
+              'foods': [item('Falafel', 'closest to you', 'Falafel')],
+            }),
+          ),
+          (
+            column: 'right',
+            raw: jsonEncode({
+              'foods': [item('Sprouts', 'to your left', 'sels Sprouts\nal 60')],
+            }),
+          ),
+        ],
+        requireEvidence: true,
+        ocrText: 'Falafel\nRoasted Brussels Sprouts\nCal 60',
+      ).foods.map((f) => f.dishName);
+      expect(names, unorderedEquals(['Falafel', 'Roasted Brussels Sprouts']));
+    });
+
     test('the same tray named two ways is listed once', () {
       expect(
         names([
