@@ -15,6 +15,14 @@ class DiningScreen extends StatelessWidget {
     ).push(MaterialPageRoute<void>(builder: (_) => const DiningScanScreen()));
   }
 
+  void _openPaddleScan(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const DiningScanScreen(paddleOnly: true),
+      ),
+    );
+  }
+
   void _openHistory(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const DiningHistoryScreen()),
@@ -73,6 +81,29 @@ class DiningScreen extends StatelessWidget {
                             Flexible(
                               child: Text(
                                 'Scan Buffet / Food',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Semantics(
+                      button: true,
+                      label: 'Scan with Paddle OCR',
+                      hint: 'Reads the food signs only',
+                      excludeSemantics: true,
+                      child: GroceryGlowButton(
+                        onPressed: () => _openPaddleScan(context),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.text_snippet_outlined, size: 28),
+                            SizedBox(width: 12),
+                            Flexible(
+                              child: Text(
+                                'Scan with Paddle OCR',
                                 textAlign: TextAlign.center,
                               ),
                             ),
