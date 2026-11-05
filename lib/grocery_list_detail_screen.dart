@@ -1097,7 +1097,7 @@ class _VoiceEntrySheetState extends State<_VoiceEntrySheet> {
       _prompt = spoken;
     });
     await widget.tts.awaitSpeakCompletion(true);
-    await widget.tts.speak(spoken);
+    await speakApp(widget.tts, spoken);
     if (mounted) setState(() => _isSpeaking = false);
   }
 

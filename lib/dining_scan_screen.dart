@@ -97,7 +97,7 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   Future<void> _speak(String text) async {
     try {
       await _ttsReady.timeout(const Duration(seconds: 3));
-      await _tts.speak(text).timeout(const Duration(seconds: 6));
+      await speakApp(_tts, text).timeout(const Duration(seconds: 6));
     } catch (error) {
       debugPrint('Dining TTS unavailable or slow: $error');
     }

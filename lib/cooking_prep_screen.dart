@@ -132,7 +132,7 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
           'Then gather your tools, such as ${_englishList(tools)}.');
     }
     if (mounted) setState(() => _speaking = true);
-    await _tts.speak(buf.toString());
+    await speakApp(_tts, buf.toString());
     if (mounted) setState(() => _speaking = false);
 
     // After the intro TTS finishes, kick off the HF cycle if enabled.
@@ -148,7 +148,7 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
     if (!_stillActive(gen)) return;
 
     if (mounted) setState(() => _speaking = true);
-    await _tts.speak('Are you ready to begin cooking?');
+    await speakApp(_tts, 'Are you ready to begin cooking?');
     if (mounted) setState(() => _speaking = false);
     if (!_stillActive(gen)) return;
 
@@ -177,7 +177,7 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
 
       case _PrepHFVerdict.unclear:
         if (mounted) setState(() => _speaking = true);
-        await _tts.speak(
+        await speakApp(_tts, 
           "I didn't catch that. "
           "Say yes to start cooking or no to hear the ingredients again.",
         );
@@ -322,13 +322,13 @@ class _CookingPrepScreenState extends State<CookingPrepScreen> {
     if (_handsFree) {
       final gen = ++_hfGen;
       if (mounted) setState(() => _speaking = true);
-      await _tts.speak('Hands-Free Mode on.');
+      await speakApp(_tts, 'Hands-Free Mode on.');
       if (mounted) setState(() => _speaking = false);
       if (!_stillActive(gen)) return;
       await _askReadyToBegin(gen);
     } else {
       if (mounted) setState(() => _speaking = true);
-      await _tts.speak('Hands-Free Mode off.');
+      await speakApp(_tts, 'Hands-Free Mode off.');
       if (mounted) setState(() => _speaking = false);
     }
   }

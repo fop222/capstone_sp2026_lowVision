@@ -775,7 +775,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
     });
 
     if (!_audioEnabled || !mounted) return;
-    await _tts.speak(shelfUser);
+    await speakApp(_tts, shelfUser);
     if (target != null) {
       if (!targetFound) {
         await _speak(
@@ -1061,7 +1061,7 @@ class _AisleScannerScreenState extends State<AisleScannerScreen> {
   Future<void> _speak(String english) async {
     if (!_audioEnabled || !mounted) return;
     final text = english;
-    await _tts.speak(text);
+    await speakApp(_tts, text);
   }
 
   List<_Item> get _uncheckedSorted {

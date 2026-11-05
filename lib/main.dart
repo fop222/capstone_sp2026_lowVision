@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_colors.dart';
 import 'app_routes.dart';
+import 'app_voice_policy.dart';
 import 'grocery_ui.dart';
 import 'take_picture_screen.dart';
 import 'supabase_auth_screen.dart';
@@ -21,6 +22,7 @@ Future<void> main() async {
   );
 
   await initCameras();
+  await AppVoicePolicy.load();
   runApp(const MyApp());
 }
 

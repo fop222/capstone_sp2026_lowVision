@@ -49,7 +49,7 @@ class _DiningResultsScreenState extends State<DiningResultsScreen> {
     try {
       await _tts.stop();
       await applyEnglishTts(_tts);
-      await _tts.speak(text);
+      await speakApp(_tts, text);
     } catch (error) {
       debugPrint('Dining TTS unavailable: $error');
     }
@@ -216,7 +216,7 @@ class _DiningFoodDetailScreenState extends State<DiningFoodDetailScreen> {
     try {
       await _tts.stop();
       await applyEnglishTts(_tts);
-      await _tts.speak(spokenDiningFood(widget.food));
+      await speakApp(_tts, spokenDiningFood(widget.food));
     } catch (error) {
       debugPrint('Dining TTS unavailable: $error');
     }

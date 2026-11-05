@@ -3074,7 +3074,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       _lastSpoken = text;
     }
     if (AppVoicePolicy.ttsMuted || !mounted) return;
-    await _tts.speak(text);
+    await speakApp(_tts, text);
   }
 
   Future<void> _speak(String english) async {

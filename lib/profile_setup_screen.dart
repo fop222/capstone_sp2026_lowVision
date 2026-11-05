@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_routes.dart';
 import 'grocery_ui.dart';
 import 'main.dart';
+import 'tts_speed_settings.dart';
 
 /// Used both for initial profile setup (after signup) and for editing an
 /// existing profile. Pass isEditing: true when opening from settings.
@@ -322,6 +323,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                         );
                       }).toList(),
                     ),
+                    const SizedBox(height: 32),
+                    const TtsSpeedSettings(),
                     const SizedBox(height: 32),
                     if (_error != null) ...[
                       Container(

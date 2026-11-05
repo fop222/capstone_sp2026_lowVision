@@ -100,7 +100,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       setState(() => _speaking = false);
       _runHandsFreeStep();
     } else {
-      await _tts.speak(_currentText);
+      await speakApp(_tts, _currentText);
       if (mounted) setState(() => _speaking = false);
     }
   }
@@ -148,7 +148,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (!mounted) return;
     await _tts.stop();
     setState(() => _speaking = true);
-    await _tts.speak(text);
+    await speakApp(_tts, text);
     if (mounted) setState(() => _speaking = false);
   }
 
@@ -302,14 +302,14 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
     // 1 ── Speak the current step.
     if (mounted) setState(() => _speaking = true);
-    await _tts.speak(_currentText);
+    await speakApp(_tts, _currentText);
     if (mounted) setState(() => _speaking = false);
     if (!_stillActive(gen)) return;
 
     // 2 ── On the last step announce completion and exit cooking.
     if (_isLast) {
       if (mounted) setState(() => _speaking = true);
-      await _tts.speak('Recipe complete. Enjoy your meal!');
+      await speakApp(_tts, 'Recipe complete. Enjoy your meal!');
       if (mounted) setState(() => _speaking = false);
       if (!mounted) return;
       int count = 0;
@@ -319,7 +319,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
     // 3 ── Ask to move on.
     if (mounted) setState(() => _speaking = true);
-    await _tts.speak('Are you ready to move on?');
+    await speakApp(_tts, 'Are you ready to move on?');
     if (mounted) setState(() => _speaking = false);
     if (!_stillActive(gen)) return;
 
@@ -354,7 +354,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
         case _HFVerdict.unclear:
           if (mounted) setState(() => _speaking = true);
-          await _tts.speak(
+          await speakApp(_tts, 
             "I didn't catch that. "
             "Say yes to continue or no to hear the step again.",
           );

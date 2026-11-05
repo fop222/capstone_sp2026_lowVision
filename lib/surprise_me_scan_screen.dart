@@ -345,7 +345,7 @@ Future<void> _onDoneScanning() async {
   // ── TTS helper ───────────────────────────────────────────────────────────────
   Future<void> _speak(String text) async {
     await applyEnglishTts(_tts);
-    await _tts.speak(text);
+    await speakApp(_tts, text);
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
