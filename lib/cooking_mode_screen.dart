@@ -69,7 +69,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// check this before acting to avoid stale results advancing the recipe.
   int _hfGen = 0;
   int _voiceGen = 0;
-  Future<void> _voiceOperation = Future<void>.value();
 
   // ── Cooking timers ───────────────────────────────────────────────────────
   /// One timer per step that mentions a time. Survives step changes.
@@ -160,21 +159,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (AppSpeech.I.stt.isListening) {
       await AppSpeech.I.stt.stop();
     }
-  }
-
-  Future<void> _navigateToStep(int nextStep) {
-    final operation = _voiceOperation.then((_) async {
-      await _cancelVoice();
-      if (!mounted) return;
-      setState(() => _step = nextStep);
-      if (_handsFree) {
-        _runHandsFreeStep();
-      } else {
-        await _speakCurrentStep();
-      }
-    });
-    _voiceOperation = operation.catchError((Object _) {});
-    return operation;
   }
 
   // ── TTS helpers ─────────────────────────────────────────────────────────
@@ -427,7 +411,14 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
   Future<void> _onPrev() async {
     if (_step == 0) return;
-    await _navigateToStep(_step - 1);
+    await _cancelVoice();
+    if (!mounted) return;
+    setState(() => _step--);
+    if (_handsFree) {
+      _runHandsFreeStep();
+    } else {
+      _speakCurrentStep();
+    }
   }
 
   Future<void> _onNext() async {
@@ -435,7 +426,14 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       _onFinish();
       return;
     }
-    await _navigateToStep(_step + 1);
+    await _cancelVoice();
+    if (!mounted) return;
+    setState(() => _step++);
+    if (_handsFree) {
+      _runHandsFreeStep();
+    } else {
+      _speakCurrentStep();
+    }
   }
 
   Future<void> _onRepeat() async {
@@ -681,6 +679,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isIdle = !_speaking && !_listening && !_waitingConfirm;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.recipe.name, overflow: TextOverflow.ellipsis),
@@ -810,7 +809,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                           _CookingButton(
                             label: '←',
                             icon: Icons.arrow_back_rounded,
-                            onTap: _listening ? null : _onPrev,
+                            onTap: isIdle ? _onPrev : null,
                             outlined: true,
                             fixedWidth: 56,
                           ),
@@ -821,7 +820,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                           child: _CookingButton(
                             label: 'Repeat',
                             icon: Icons.replay_rounded,
-                            onTap: _listening ? null : _onRepeat,
+                            onTap: isIdle ? _onRepeat : null,
                             outlined: true,
                           ),
                         ),
@@ -834,7 +833,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                             icon: _isLast
                                 ? Icons.check_circle_outline_rounded
                                 : Icons.arrow_forward_rounded,
-                            onTap: _listening ? null : _onNext,
+                            onTap: isIdle ? _onNext : null,
                             filled: true,
                             accent: _isLast
                                 ? const Color(0xFF4DEBA0)
