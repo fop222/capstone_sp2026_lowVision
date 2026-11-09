@@ -119,12 +119,17 @@ void main() {
     expect(
       timerReadySpeech('Pizza Timer', const Duration(minutes: 18)),
       'Pizza Timer is set for 18 minutes. '
-      'It will provide alerts along the way.',
+      'It will provide alerts along the way. '
+      'Press Start to start the timer.',
     );
     expect(timerStartedSpeech('Pizza Timer'), 'Pizza Timer started.');
     expect(
-      timerRemainingSpeech('Pizza Timer', const Duration(minutes: 6)),
-      'Pizza Timer. 6 minutes remaining.',
+      timerProgressSpeech(
+        'Pizza Timer',
+        const Duration(minutes: 12),
+        const Duration(minutes: 6),
+      ),
+      'Pizza Timer. 12 minutes have passed. 6 minutes remaining.',
     );
     expect(
       timerFinishedSpeech('Pizza Timer', const Duration(minutes: 18)),

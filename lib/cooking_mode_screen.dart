@@ -527,7 +527,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
         if (elapsed < mark) break;
         if (timer.announcedSeconds.add(mark.inSeconds)) {
           _announce(
-            timerRemainingSpeech(name, timer.upper - mark),
+            timerProgressSpeech(name, mark, timer.upper - mark),
             timer: timer,
           );
         }
@@ -631,13 +631,15 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     }
     if (timer.startedAt == null) {
       if (timer.hasStarted) {
-        return 'Paused at ${_formatClock(timer.elapsed)}.';
+        return 'Paused. Time passed ${_formatClock(timer.elapsed)}. '
+            'Time left ${_formatClock(timer.remaining)}.';
       }
       final setFor = 'Set for ${formatCookDuration(timer.upper)}. Not started.';
       if (!timer.isRange) return setFor;
       return '$setFor Alerts from ${formatCookDuration(timer.lower)}.';
     }
-    return 'Time passed ${_formatClock(timer.elapsed)}';
+    return 'Time passed ${_formatClock(timer.elapsed)}. '
+        'Time left ${_formatClock(timer.remaining)}.';
   }
 
   String _formatClock(Duration duration) {
@@ -1100,10 +1102,12 @@ class _CookTimerCard extends StatelessWidget {
                     onTap: isRunning ? onPause : onStart,
                     filled: !isRunning,
                     outlined: isRunning,
-                    accent: isRunning ? Colors.white70 : kBrandPurpleLight,
-                    height: 72,
-                    fontSize: 22,
-                    iconSize: 34,
+                    accent: isRunning
+                        ? const Color(0xFFE53935)
+                        : const Color(0xFF2EAD62),
+                    height: 96,
+                    fontSize: 28,
+                    iconSize: 42,
                     semanticsLabel: isRunning
                         ? 'Pause $name'
                         : (paused ? 'Resume $name' : 'Start $name'),

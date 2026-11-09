@@ -138,7 +138,8 @@ String _passedClause(Duration duration) {
 /// Spoken when a step first offers its timer. The timer is not running yet.
 String timerReadySpeech(String timerName, Duration duration) {
   return '$timerName is set for ${formatCookDuration(duration)}. '
-      'It will provide alerts along the way.';
+      'It will provide alerts along the way. '
+      'Press Start to start the timer.';
 }
 
 /// Spoken when the cook presses Start.
@@ -148,9 +149,14 @@ String timerPausedSpeech(String timerName) => '$timerName paused.';
 
 String timerResumedSpeech(String timerName) => '$timerName resumed.';
 
-/// Spoken for an in-progress remaining-time alert.
-String timerRemainingSpeech(String timerName, Duration remaining) {
-  return '$timerName. ${formatCookDuration(remaining)} remaining.';
+/// Spoken for an in-progress elapsed and remaining-time alert.
+String timerProgressSpeech(
+  String timerName,
+  Duration elapsed,
+  Duration remaining,
+) {
+  return '$timerName. ${_passedClause(elapsed)}. '
+      '${formatCookDuration(remaining)} remaining.';
 }
 
 /// Spoken once, when the timer reaches its full duration.
