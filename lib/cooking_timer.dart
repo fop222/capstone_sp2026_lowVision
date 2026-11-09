@@ -163,3 +163,138 @@ String timerProgressSpeech(
 String timerFinishedSpeech(String timerName, Duration duration) {
   return '${_passedClause(duration)}. $timerName is finished.';
 }
+
+/// Extra words that mean a recipe-name part, used when the step says
+/// "sandwich" instead of "grilled cheese".
+const _dishAliases = <String, List<String>>{
+  'grilled cheese': ['sandwich'],
+  'pancakes': ['pancake'],
+  'scrambled eggs': ['egg', 'eggs'],
+  'veggie fried rice': ['rice'],
+  'chocolate chip cookies': ['cookie', 'cookies'],
+  'brownies': ['brownie'],
+  'yogurt parfait': ['parfait', 'yogurt'],
+  'burger': ['patty', 'bun'],
+  'spaghetti': ['pasta', 'noodle', 'noodles', 'sauce'],
+  'pizza': ['crust'],
+};
+
+class _DishPart {
+  const _DishPart(this.label, this.keywords);
+
+  final String label;
+  final List<String> keywords;
+}
+
+/// Food name for a step timer, such as "Tomato Basil Soup" or
+/// "Grilled Cheese, second side".
+///
+/// Combo recipes (a name split on "+", "&", "and", or "with") use the part
+/// the step is about. When this step does not name either food, earlier steps
+/// decide which part is underway. A single-recipe step that names an
+/// ingredient uses that ingredient.
+String cookingTimerFoodLabel({
+  required String recipeName,
+  required List<String> steps,
+  required int stepIndex,
+  List<String> ingredientNames = const [],
+}) {
+  final parts = _dishParts(recipeName);
+  final step = steps[stepIndex];
+
+  String? label;
+  if (parts.length > 1) {
+    label =
+        _matchDishPart(step, parts) ??
+        _matchEarlierDishPart(steps, stepIndex, parts);
+  }
+  label ??= _matchIngredient(step, ingredientNames);
+  label ??= parts.length == 1 ? parts.first.label : recipeName.trim();
+
+  if (_isSecondSide(step) && !label.toLowerCase().contains('second side')) {
+    label = '$label, second side';
+  }
+  return label;
+}
+
+List<_DishPart> _dishParts(String recipeName) {
+  final labels = recipeName
+      .split(RegExp(r'\s+(?:and|with)\s+|\s*[+&]\s*', caseSensitive: false))
+      .map((part) => part.trim())
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (labels.isEmpty) {
+    final name = recipeName.trim();
+    return [if (name.isNotEmpty) _DishPart(name, _keywordsFor(name))];
+  }
+  return [for (final label in labels) _DishPart(label, _keywordsFor(label))];
+}
+
+List<String> _keywordsFor(String label) {
+  final normalized = label.toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  final words = normalized
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((word) => word.length > 3)
+      .toList();
+  final aliases = _dishAliases[normalized] ?? const <String>[];
+  return {...words, ...aliases}.toList();
+}
+
+String? _matchDishPart(String text, List<_DishPart> parts) {
+  _DishPart? best;
+  var bestAt = -1;
+  for (final part in parts) {
+    for (final keyword in part.keywords) {
+      final match = RegExp(
+        '\\b${RegExp.escape(keyword)}\\b',
+        caseSensitive: false,
+      ).allMatches(text);
+      for (final found in match) {
+        if (found.start >= bestAt) {
+          best = part;
+          bestAt = found.start;
+        }
+      }
+    }
+  }
+  return best?.label;
+}
+
+String? _matchEarlierDishPart(
+  List<String> steps,
+  int stepIndex,
+  List<_DishPart> parts,
+) {
+  for (var index = stepIndex - 1; index >= 0; index--) {
+    final match = _matchDishPart(steps[index], parts);
+    if (match != null) return match;
+  }
+  return null;
+}
+
+String? _matchIngredient(String step, List<String> ingredientNames) {
+  for (final ingredient in ingredientNames) {
+    final clean = ingredient.trim();
+    if (clean.length < 4) continue;
+    final words = clean
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((word) => word.length > 3);
+    if (words.any((word) => _containsWord(step, word))) return clean;
+  }
+  return null;
+}
+
+bool _containsWord(String text, String word) {
+  return RegExp(
+    '\\b${RegExp.escape(word)}\\b',
+    caseSensitive: false,
+  ).hasMatch(text);
+}
+
+bool _isSecondSide(String step) {
+  return RegExp(
+    r'\b(?:second|other)\s+side\b',
+    caseSensitive: false,
+  ).hasMatch(step);
+}

@@ -507,22 +507,14 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   }
 
   String _timerLabel(_CookTimer timer) {
-    final step = timer.stepText.toLowerCase();
-    final candidates = <String>[
-      ...widget.recipe.name.split(RegExp(r'\s+(?:and|with)\s+|\s*[+&]\s*')),
-      ...widget.recipe.ingredients.map((ingredient) => ingredient.name),
-    ];
-    for (final candidate in candidates) {
-      final clean = candidate.trim();
-      if (clean.length < 4) continue;
-      final words = clean
-          .toLowerCase()
-          .split(RegExp(r'[^a-z0-9]+'))
-          .where((word) => word.length > 3)
-          .toList();
-      if (words.isNotEmpty && words.any(step.contains)) return clean;
-    }
-    return widget.recipe.name;
+    return cookingTimerFoodLabel(
+      recipeName: widget.recipe.name,
+      steps: _steps,
+      stepIndex: timer.stepIndex,
+      ingredientNames: [
+        for (final ingredient in widget.recipe.ingredients) ingredient.name,
+      ],
+    );
   }
 
   void _startCookTimer(_CookTimer timer) {
@@ -843,7 +835,9 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                             ),
                           ),
                           const SizedBox(width: 14),
-                          // Next / Finish
+                          // Next / Finish stays available while a step is
+                          // being read or Hands-Free is listening, so the cook
+                          // can move on midway through the recipe.
                           Expanded(
                             flex: 2,
                             child: _CookingButton(
@@ -851,7 +845,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                               icon: _isLast
                                   ? Icons.check_circle_outline_rounded
                                   : Icons.arrow_forward_rounded,
-                              onTap: isIdle ? _onNext : null,
+                              onTap: _onNext,
                               filled: true,
                               accent: _isLast
                                   ? const Color(0xFF4DEBA0)

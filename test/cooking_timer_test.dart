@@ -140,4 +140,62 @@ void main() {
       '30 seconds have passed. Pancake Timer is finished.',
     );
   });
+
+  test('names the food each timer belongs to in a two-part recipe', () {
+    const name = 'Grilled Cheese + Tomato Basil Soup';
+    const steps = [
+      'Open 1 can of Campbell\'s Condensed Tomato Soup and pour it into a medium saucepan.',
+      'Add 1⅓ cups water to the saucepan and stir it together with the soup.',
+      'Place the saucepan on the stove over medium heat and cook for 5–7 minutes, stirring every 1–2 minutes.',
+      'When the soup is hot and steaming, turn off the heat and leave it in the saucepan while you make the sandwich.',
+      'Spread 1 tablespoon butter over one side of each of 2 slices of bread.',
+      'Place a frying pan on the stove over medium-low heat and warm it for 2 minutes.',
+      'Place one bread slice in the pan with the buttered side facing down.',
+      'Cook the sandwich for 3–4 minutes until you hear a gentle sizzling sound.',
+      'Slide a spatula underneath the sandwich and carefully flip it over.',
+      'Cook the second side for another 3–4 minutes until the bread feels firm and crisp and the cheese is melted.',
+    ];
+
+    String label(int step) => cookingTimerFoodLabel(
+      recipeName: name,
+      steps: steps,
+      stepIndex: step,
+      ingredientNames: const [
+        "Campbell's Condensed Tomato Soup",
+        'Water',
+        'Bread',
+        'Butter',
+        'Cheese',
+      ],
+    );
+
+    expect(label(2), 'Tomato Basil Soup');
+    expect(label(5), 'Grilled Cheese');
+    expect(label(7), 'Grilled Cheese');
+    expect(label(9), 'Grilled Cheese, second side');
+  });
+
+  test('uses an ingredient when a one-dish step names it', () {
+    expect(
+      cookingTimerFoodLabel(
+        recipeName: 'Spaghetti',
+        steps: const [
+          'Add the chopped onion and cook for 3 minutes until soft.',
+        ],
+        stepIndex: 0,
+        ingredientNames: const ['Chopped onion', 'Lean ground meat'],
+      ),
+      'Chopped onion',
+    );
+    expect(
+      cookingTimerFoodLabel(
+        recipeName: 'Pancakes',
+        steps: const [
+          'Cook the second side for 1–2 minutes until the pancake feels firm.',
+        ],
+        stepIndex: 0,
+      ),
+      'Pancakes, second side',
+    );
+  });
 }
