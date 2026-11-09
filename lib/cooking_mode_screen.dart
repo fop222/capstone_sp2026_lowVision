@@ -655,15 +655,13 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     }
     if (timer.startedAt == null) {
       if (timer.hasStarted) {
-        return 'Paused. Time passed ${_formatClock(timer.elapsed)}. '
-            'Time left ${_formatClock(timer.remaining)}.';
+        return 'Paused. Time passed ${_formatClock(timer.elapsed)}.';
       }
       final setFor = 'Set for ${formatCookDuration(timer.upper)}. Not started.';
       if (!timer.isRange) return setFor;
       return '$setFor Alerts from ${formatCookDuration(timer.lower)}.';
     }
-    return 'Time passed ${_formatClock(timer.elapsed)}. '
-        'Time left ${_formatClock(timer.remaining)}.';
+    return 'Time passed ${_formatClock(timer.elapsed)}';
   }
 
   String _formatClock(Duration duration) {
