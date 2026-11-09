@@ -74,6 +74,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   final List<_CookTimer> _cookTimers = [];
   Timer? _cookTick;
   Future<void> _timerSpeechTail = Future<void>.value();
+  int _timerSpeechGeneration = 0;
   bool _acceptTimerSpeech = true;
 
   // ── Convenience ─────────────────────────────────────────────────────────
@@ -142,6 +143,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// Must be called before every manual navigation action.
   Future<void> _cancelVoice() async {
     _hfGen++; // invalidate in-flight cycle
+    _timerSpeechGeneration++;
     if (mounted) {
       setState(() {
         _speaking = false;
@@ -547,18 +549,27 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   }
 
   Future<void> _announce(String text, {_CookTimer? timer}) {
+    final generation = _timerSpeechGeneration;
     final result = _timerSpeechTail.then(
-      (_) => _speakTimerLine(text, timer: timer),
+      (_) => _speakTimerLine(text, timer: timer, generation: generation),
     );
     _timerSpeechTail = result.catchError((Object _) {});
     return result;
   }
 
-  Future<void> _speakTimerLine(String text, {_CookTimer? timer}) async {
+  Future<void> _speakTimerLine(
+    String text, {
+    _CookTimer? timer,
+    required int generation,
+  }) async {
     while (mounted && _acceptTimerSpeech && _speaking) {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
-    if (!mounted || !_acceptTimerSpeech) return;
+    if (!mounted ||
+        !_acceptTimerSpeech ||
+        generation != _timerSpeechGeneration) {
+      return;
+    }
     setState(() => _speaking = true);
     try {
       await speakApp(_tts, text);
@@ -656,8 +667,6 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bool isIdle = !_speaking && !_listening && !_waitingConfirm;
-
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.recipe.name, overflow: TextOverflow.ellipsis),
@@ -787,7 +796,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                           _CookingButton(
                             label: '←',
                             icon: Icons.arrow_back_rounded,
-                            onTap: (_speaking || _listening) ? null : _onPrev,
+                            onTap: _listening ? null : _onPrev,
                             outlined: true,
                             fixedWidth: 56,
                           ),
@@ -798,7 +807,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                           child: _CookingButton(
                             label: 'Repeat',
                             icon: Icons.replay_rounded,
-                            onTap: isIdle ? _onRepeat : null,
+                            onTap: _listening ? null : _onRepeat,
                             outlined: true,
                           ),
                         ),
@@ -811,7 +820,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                             icon: _isLast
                                 ? Icons.check_circle_outline_rounded
                                 : Icons.arrow_forward_rounded,
-                            onTap: isIdle ? _onNext : null,
+                            onTap: _listening ? null : _onNext,
                             filled: true,
                             accent: _isLast
                                 ? const Color(0xFF4DEBA0)
