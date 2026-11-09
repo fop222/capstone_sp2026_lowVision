@@ -4,7 +4,13 @@
 /// step aloud.  When Hands-Free Mode is enabled Lumio reads the step, asks
 /// "Are you ready to move on?", and advances only on an affirmative spoken
 /// response.  Manual controls are always available.
+///
+/// A step that includes a cooking time gets a named timer. Timers stay on
+/// screen while the cook moves between steps, start only from the Start
+/// button, and are not created again if that step is opened twice.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +19,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 
 import 'app_speech.dart';
 import 'app_tts.dart';
+import 'cooking_timer.dart';
 import 'grocery_ui.dart';
 import 'recipe_data.dart';
 
@@ -62,6 +69,13 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// check this before acting to avoid stale results advancing the recipe.
   int _hfGen = 0;
 
+  // ── Cooking timers ───────────────────────────────────────────────────────
+  /// One timer per step that mentions a time. Survives step changes.
+  final List<_CookTimer> _cookTimers = [];
+  Timer? _cookTick;
+  Future<void> _timerSpeechTail = Future<void>.value();
+  bool _acceptTimerSpeech = true;
+
   // ── Convenience ─────────────────────────────────────────────────────────
   List<String> get _steps => widget.recipe.steps;
   int get _total => _steps.length;
@@ -100,14 +114,15 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       setState(() => _speaking = false);
       _runHandsFreeStep();
     } else {
-      await speakApp(_tts, _currentText);
-      if (mounted) setState(() => _speaking = false);
+      await _speakCurrentStep();
     }
   }
 
   @override
   void dispose() {
     _hfGen++; // invalidate any in-flight HF cycle
+    _acceptTimerSpeech = false;
+    _cookTick?.cancel();
     _tts.stop();
     if (AppSpeech.I.stt.isListening) {
       AppSpeech.I.stt.stop();
@@ -119,8 +134,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
   /// Returns true only when the widget is still mounted, HF is still on, and
   /// the async work belongs to the current generation (not stale).
-  bool _stillActive(int gen) =>
-      mounted && _handsFree && _hfGen == gen;
+  bool _stillActive(int gen) => mounted && _handsFree && _hfGen == gen;
 
   // ── Cancel all active voice work ─────────────────────────────────────────
 
@@ -162,13 +176,11 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     // Stop any leftover session from the shopping scanner or prior call.
     if (AppSpeech.I.stt.isListening) {
       await AppSpeech.I.stt.stop();
-      await Future.delayed(
-          Duration(milliseconds: kIsWeb ? 700 : 300));
+      await Future.delayed(Duration(milliseconds: kIsWeb ? 700 : 300));
     }
     // Always give a short startup delay so the browser mic is ready and
     // the user has a moment to prepare before the silence clock starts.
-    await Future.delayed(
-        Duration(milliseconds: kIsWeb ? 1200 : 500));
+    await Future.delayed(Duration(milliseconds: kIsWeb ? 1200 : 500));
     if (!_stillActive(gen)) return '';
 
     var recognized = '';
@@ -233,20 +245,28 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// Uses exact phrase matching first, then token matching, to avoid loose
   /// substring false-positives (e.g. "yes not yet" → no, not yes).
   _HFVerdict _classifyResponse(String text) {
-    final s = text
-        .toLowerCase()
-        .replaceAll(RegExp(r"[^\w\s]"), '')
-        .trim();
+    final s = text.toLowerCase().replaceAll(RegExp(r"[^\w\s]"), '').trim();
     if (s.isEmpty) return _HFVerdict.unclear;
 
     // Multi-word phrase shortcuts
     const yesPhrases = [
-      'move on', 'yes please', 'go ahead', 'yes i am',
-      'i am ready', 'im ready', 'yes im', 'yes i',
+      'move on',
+      'yes please',
+      'go ahead',
+      'yes i am',
+      'i am ready',
+      'im ready',
+      'yes im',
+      'yes i',
     ];
     const noPhrases = [
-      'not yet', 'say that again', 'go back', 'hear it again',
-      'hear that again', 'no not yet', 'not ready',
+      'not yet',
+      'say that again',
+      'go back',
+      'hear it again',
+      'hear that again',
+      'no not yet',
+      'not ready',
     ];
     for (final p in yesPhrases) {
       if (s.contains(p)) return _HFVerdict.yes;
@@ -255,14 +275,13 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       if (s.contains(p)) return _HFVerdict.no;
     }
 
-    final tokens =
-        s.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+    final tokens = s.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
 
     const yesSet = {'yes', 'yeah', 'yep', 'ready', 'next', 'continue'};
-    const noSet  = {'no', 'nope', 'repeat', 'again', 'back'};
+    const noSet = {'no', 'nope', 'repeat', 'again', 'back'};
 
     final hasYes = tokens.any(yesSet.contains);
-    final hasNo  = tokens.any(noSet.contains);
+    final hasNo = tokens.any(noSet.contains);
 
     // "not ready" / "not yet" — negation overrides
     if (tokens.contains('not') &&
@@ -306,8 +325,16 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (mounted) setState(() => _speaking = false);
     if (!_stillActive(gen)) return;
 
+    await _offerTimerForCurrentStep();
+    if (!_stillActive(gen)) return;
+
     // 2 ── On the last step announce completion and exit cooking.
+    // Stay put when this step still has a timer to start or finish, so the
+    // cook can use it before Hands-Free Mode leaves the screen.
     if (_isLast) {
+      if (_cookTimers.any((t) => t.stepIndex == _step && !t.finished)) {
+        return;
+      }
       if (mounted) setState(() => _speaking = true);
       await speakApp(_tts, 'Recipe complete. Enjoy your meal!');
       if (mounted) setState(() => _speaking = false);
@@ -354,13 +381,14 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
         case _HFVerdict.unclear:
           if (mounted) setState(() => _speaking = true);
-          await speakApp(_tts, 
+          await speakApp(
+            _tts,
             "I didn't catch that. "
             "Say yes to continue or no to hear the step again.",
           );
           if (mounted) setState(() => _speaking = false);
           if (!_stillActive(gen)) return;
-          // Loop continues — listen again for the same step.
+        // Loop continues — listen again for the same step.
       }
     }
   }
@@ -375,7 +403,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
-      _speak(_currentText);
+      _speakCurrentStep();
     }
   }
 
@@ -390,7 +418,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
-      _speak(_currentText);
+      _speakCurrentStep();
     }
   }
 
@@ -400,7 +428,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
-      _speak(_currentText);
+      _speakCurrentStep();
     }
   }
 
@@ -426,25 +454,200 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     }
   }
 
+  // ── Cooking timers ────────────────────────────────────────────────────────
+
+  /// Reads the step, then offers a timer when this step has a cooking time.
+  Future<void> _speakCurrentStep() async {
+    await _speak(_currentText);
+    if (!mounted) return;
+    await _offerTimerForCurrentStep();
+  }
+
+  /// Creates the step's timer the first time it is shown. Revisiting the step
+  /// leaves the existing timer alone.
+  Future<void> _offerTimerForCurrentStep() async {
+    if (_cookTimers.any((t) => t.stepIndex == _step)) return;
+    final parsed = parseStepCookTime(_currentText);
+    if (parsed == null) return;
+
+    final timer = _CookTimer(
+      stepIndex: _step,
+      lower: parsed.lower,
+      upper: parsed.upper,
+    );
+    setState(() => _cookTimers.add(timer));
+    await _announce(timerReadySpeech(_timerName(timer), timer.upper));
+  }
+
+  String _timerName(_CookTimer timer) {
+    final base = '${widget.recipe.name} Timer';
+    if (_cookTimers.length < 2) return base;
+    return '$base, step ${timer.stepIndex + 1}';
+  }
+
+  void _startCookTimer(_CookTimer timer) {
+    if (timer.startedAt != null || timer.finished) return;
+    setState(() => timer.startedAt = DateTime.now());
+    _ensureCookTick();
+    _announce(timerStartedSpeech(_timerName(timer)));
+  }
+
+  void _ensureCookTick() {
+    _cookTick ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      _onCookTick();
+    });
+  }
+
+  void _onCookTick() {
+    if (!mounted) return;
+    for (final timer in _cookTimers) {
+      final startedAt = timer.startedAt;
+      if (startedAt == null || timer.finished) continue;
+      final elapsed = DateTime.now().difference(startedAt);
+      final name = _timerName(timer);
+      for (final mark in elapsedAlertMarks(timer.lower, timer.upper)) {
+        if (elapsed < mark) break;
+        if (timer.announcedSeconds.add(mark.inSeconds)) {
+          _announce(
+            timerRemainingSpeech(name, timer.upper - mark),
+            timer: timer,
+          );
+        }
+      }
+      if (elapsed >= timer.upper && !timer.finishedAnnounced) {
+        timer.finished = true;
+        timer.finishedAnnounced = true;
+        _announce(timerFinishedSpeech(name, timer.upper), timer: timer);
+      }
+    }
+    setState(() {});
+    final stillRunning = _cookTimers.any((t) => t.isRunning);
+    if (!stillRunning) {
+      _cookTick?.cancel();
+      _cookTick = null;
+    }
+  }
+
+  Future<void> _announce(String text, {_CookTimer? timer}) {
+    final result = _timerSpeechTail.then(
+      (_) => _speakTimerLine(text, timer: timer),
+    );
+    _timerSpeechTail = result.catchError((Object _) {});
+    return result;
+  }
+
+  Future<void> _speakTimerLine(String text, {_CookTimer? timer}) async {
+    while (mounted && _acceptTimerSpeech && _speaking) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (!mounted || !_acceptTimerSpeech || timer?.cleared == true) return;
+    setState(() => _speaking = true);
+    try {
+      await speakApp(_tts, text);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _speaking = false);
+    }
+  }
+
+  Widget _buildCookTimers() {
+    if (_cookTimers.isEmpty) return const SizedBox.shrink();
+
+    final ordered = [..._cookTimers]
+      ..sort((a, b) {
+        final aRank = _timerSortRank(a);
+        final bRank = _timerSortRank(b);
+        if (aRank != bRank) return aRank.compareTo(bRank);
+        return a.stepIndex.compareTo(b.stepIndex);
+      });
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: ListView.separated(
+          shrinkWrap: true,
+          primary: false,
+          physics: const ClampingScrollPhysics(),
+          itemCount: ordered.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final timer = ordered[index];
+            final waiting = timer.startedAt == null && !timer.finished;
+            return _CookTimerCard(
+              name: _timerName(timer),
+              clock: timer.finished
+                  ? 'Finished'
+                  : _formatClock(waiting ? timer.upper : timer.remaining),
+              subtitle: _timerSubtitle(timer),
+              highlight: timer.stepIndex == _step,
+              progress: timer.isRunning
+                  ? (timer.elapsed.inMilliseconds / timer.upper.inMilliseconds)
+                        .clamp(0.0, 1.0)
+                  : null,
+              onStart: waiting ? () => _startCookTimer(timer) : null,
+              onStopClear: () => _stopAndClearCookTimer(timer),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _stopAndClearCookTimer(_CookTimer timer) {
+    timer.cleared = true;
+    setState(() => _cookTimers.remove(timer));
+    if (!_cookTimers.any((t) => t.isRunning)) {
+      _cookTick?.cancel();
+      _cookTick = null;
+    }
+  }
+
+  /// Unstarted timers for the current step stay at the top, then other
+  /// unstarted timers, then running ones, then finished ones.
+  int _timerSortRank(_CookTimer timer) {
+    final waiting = timer.startedAt == null && !timer.finished;
+    if (waiting && timer.stepIndex == _step) return 0;
+    if (waiting) return 1;
+    if (timer.isRunning) return 2;
+    return 3;
+  }
+
+  String _timerSubtitle(_CookTimer timer) {
+    if (timer.finished) {
+      return '${formatCookDuration(timer.upper)} have passed';
+    }
+    if (timer.startedAt == null) {
+      final setFor = 'Set for ${formatCookDuration(timer.upper)}. Not started.';
+      if (!timer.isRange) return setFor;
+      return '$setFor Alerts from ${formatCookDuration(timer.lower)}.';
+    }
+    return 'Time passed ${_formatClock(timer.elapsed)}';
+  }
+
+  String _formatClock(Duration duration) {
+    final safe = duration.isNegative ? Duration.zero : duration;
+    final hours = safe.inHours;
+    final minutes = safe.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = safe.inSeconds.remainder(60).toString().padLeft(2, '0');
+    if (hours > 0) return '$hours:$minutes:$seconds';
+    return '$minutes:$seconds';
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bool isIdle =
-        !_speaking && !_listening && !_waitingConfirm;
+    final bool isIdle = !_speaking && !_listening && !_waitingConfirm;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.recipe.name,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(widget.recipe.name, overflow: TextOverflow.ellipsis),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 12),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: kBrandPurpleMid.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(20),
@@ -469,7 +672,9 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 24, vertical: 20),
+                  horizontal: 24,
+                  vertical: 20,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -479,8 +684,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                       child: LinearProgressIndicator(
                         value: (_step + 1) / _total,
                         minHeight: 6,
-                        backgroundColor:
-                            Colors.white.withValues(alpha: 0.12),
+                        backgroundColor: Colors.white.withValues(alpha: 0.12),
                         valueColor: AlwaysStoppedAnimation<Color>(
                           kBrandPurpleLight,
                         ),
@@ -502,7 +706,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                     // ── Hands-Free Mode toggle ────────────────────────
                     _HandsFreeToggle(
                       value: _handsFree,
-                        onToggle: (_speaking || _listening || _waitingConfirm)
+                      onToggle: (_speaking || _listening || _waitingConfirm)
                           ? null
                           : _onToggleHandsFree,
                     ),
@@ -528,13 +732,12 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                               width: double.infinity,
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: Colors.white
-                                    .withValues(alpha: 0.07),
-                                borderRadius:
-                                    BorderRadius.circular(20),
+                                color: Colors.white.withValues(alpha: 0.07),
+                                borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
-                                  color: kBrandPurpleLight
-                                      .withValues(alpha: 0.3),
+                                  color: kBrandPurpleLight.withValues(
+                                    alpha: 0.3,
+                                  ),
                                   width: 1.5,
                                 ),
                               ),
@@ -542,8 +745,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                                 liveRegion: true,
                                 child: Text(
                                   _currentText,
-                                  style: theme.textTheme.bodyLarge
-                                      ?.copyWith(
+                                  style: theme.textTheme.bodyLarge?.copyWith(
                                     color: Colors.white,
                                     fontSize: 22,
                                     height: 1.6,
@@ -556,6 +758,8 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                       ),
                     ),
 
+                    _buildCookTimers(),
+
                     const SizedBox(height: 8),
 
                     // ── Primary action buttons ────────────────────────
@@ -566,9 +770,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                           _CookingButton(
                             label: '←',
                             icon: Icons.arrow_back_rounded,
-                            onTap: (_speaking || _listening)
-                                ? null
-                                : _onPrev,
+                            onTap: (_speaking || _listening) ? null : _onPrev,
                             outlined: true,
                             fixedWidth: 56,
                           ),
@@ -588,9 +790,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                         Expanded(
                           flex: 2,
                           child: _CookingButton(
-                            label: _isLast
-                                ? 'Finish Cooking'
-                                : 'Next',
+                            label: _isLast ? 'Finish Cooking' : 'Next',
                             icon: _isLast
                                 ? Icons.check_circle_outline_rounded
                                 : Icons.arrow_forward_rounded,
@@ -617,10 +817,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 // ─── _HandsFreeToggle ─────────────────────────────────────────────────────────
 
 class _HandsFreeToggle extends StatelessWidget {
-  const _HandsFreeToggle({
-    required this.value,
-    required this.onToggle,
-  });
+  const _HandsFreeToggle({required this.value, required this.onToggle});
 
   final bool value;
   final VoidCallback? onToggle;
@@ -633,8 +830,7 @@ class _HandsFreeToggle extends StatelessWidget {
       child: GestureDetector(
         onTap: onToggle,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: value
                 ? kBrandPurpleLight.withValues(alpha: 0.15)
@@ -662,8 +858,7 @@ class _HandsFreeToggle extends StatelessWidget {
                     Text(
                       'Hands-Free Mode',
                       style: TextStyle(
-                        color:
-                            value ? kBrandPurpleLight : Colors.white70,
+                        color: value ? kBrandPurpleLight : Colors.white70,
                         fontWeight: FontWeight.w700,
                         fontSize: 15,
                       ),
@@ -683,7 +878,7 @@ class _HandsFreeToggle extends StatelessWidget {
               Switch(
                 value: value,
                 onChanged: onToggle == null ? null : (_) => onToggle!(),
-                activeColor: kBrandPurpleLight,
+                activeThumbColor: kBrandPurpleLight,
                 inactiveTrackColor: Colors.white12,
               ),
             ],
@@ -736,8 +931,7 @@ class _HFStatusBar extends StatelessWidget {
       color = Colors.white54;
     } else if (handsFree && !speechAvailable) {
       icon = Icons.mic_off_rounded;
-      text =
-          'Microphone unavailable — use the buttons to navigate.';
+      text = 'Microphone unavailable — use the buttons to navigate.';
       color = Colors.orange;
     } else {
       return const SizedBox.shrink();
@@ -754,11 +948,150 @@ class _HFStatusBar extends StatelessWidget {
             const SizedBox(width: 6),
             Flexible(
               child: Text(
-                text!,
+                text,
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: color, fontSize: 14, height: 1.3),
+                style: TextStyle(color: color, fontSize: 14, height: 1.3),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CookTimer {
+  _CookTimer({
+    required this.stepIndex,
+    required this.lower,
+    required this.upper,
+  });
+
+  final int stepIndex;
+  final Duration lower;
+  final Duration upper;
+  DateTime? startedAt;
+  bool finished = false;
+  bool finishedAnnounced = false;
+  bool cleared = false;
+  final Set<int> announcedSeconds = {};
+
+  bool get isRange => lower < upper;
+  bool get isRunning => startedAt != null && !finished;
+
+  Duration get elapsed {
+    final start = startedAt;
+    if (start == null) return Duration.zero;
+    final value = DateTime.now().difference(start);
+    return value.isNegative ? Duration.zero : value;
+  }
+
+  Duration get remaining {
+    final value = upper - elapsed;
+    return value.isNegative ? Duration.zero : value;
+  }
+}
+
+class _CookTimerCard extends StatelessWidget {
+  const _CookTimerCard({
+    required this.name,
+    required this.clock,
+    required this.subtitle,
+    required this.highlight,
+    required this.progress,
+    required this.onStart,
+    required this.onStopClear,
+  });
+
+  final String name;
+  final String clock;
+  final String subtitle;
+  final bool highlight;
+  final double? progress;
+  final VoidCallback? onStart;
+  final VoidCallback onStopClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = highlight ? kBrandPurpleLight : Colors.white70;
+    final isWaiting = onStart != null;
+    return Semantics(
+      liveRegion: true,
+      label: '$name, $clock. $subtitle',
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: highlight ? 0.1 : 0.06),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: accent.withValues(alpha: 0.45)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.timer_outlined, color: accent, size: 24),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  clock,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: const TextStyle(color: Colors.white60, fontSize: 13),
+            ),
+            if (progress != null) ...[
+              const SizedBox(height: 9),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 6,
+                  backgroundColor: Colors.white12,
+                  valueColor: AlwaysStoppedAnimation<Color>(accent),
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _CookingButton(
+                    label: isWaiting ? 'Start' : 'Stop / Clear',
+                    icon: isWaiting
+                        ? Icons.play_arrow_rounded
+                        : Icons.stop_circle_outlined,
+                    onTap: isWaiting ? onStart : onStopClear,
+                    filled: isWaiting,
+                    outlined: !isWaiting,
+                    accent: isWaiting ? kBrandPurpleLight : Colors.white70,
+                    height: 58,
+                    fontSize: 18,
+                    iconSize: 26,
+                    semanticsLabel: isWaiting
+                        ? 'Start $name'
+                        : 'Stop and clear $name',
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -778,6 +1111,10 @@ class _CookingButton extends StatelessWidget {
     this.filled = false,
     this.accent,
     this.fixedWidth,
+    this.height = 60,
+    this.fontSize = 17,
+    this.iconSize = 22,
+    this.semanticsLabel,
   });
 
   final String label;
@@ -787,6 +1124,10 @@ class _CookingButton extends StatelessWidget {
   final bool filled;
   final Color? accent;
   final double? fixedWidth;
+  final double height;
+  final double fontSize;
+  final double iconSize;
+  final String? semanticsLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -797,24 +1138,23 @@ class _CookingButton extends StatelessWidget {
       onTap: onTap,
       child: Semantics(
         button: true,
-        label: label,
+        label: semanticsLabel ?? label,
         enabled: !disabled,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          height: 60,
+          height: height,
           width: fixedWidth,
           decoration: BoxDecoration(
             color: filled
                 ? (disabled
-                    ? color.withValues(alpha: 0.2)
-                    : color.withValues(alpha: 0.85))
+                      ? color.withValues(alpha: 0.2)
+                      : color.withValues(alpha: 0.85))
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: disabled
                   ? Colors.white12
-                  : color.withValues(
-                      alpha: outlined ? 0.7 : 0.0),
+                  : color.withValues(alpha: outlined ? 0.7 : 0.0),
               width: 1.5,
             ),
           ),
@@ -823,20 +1163,17 @@ class _CookingButton extends StatelessWidget {
             children: [
               Icon(
                 icon,
-                color:
-                    disabled ? Colors.white24 : Colors.white,
-                size: 22,
+                color: disabled ? Colors.white24 : Colors.white,
+                size: iconSize,
               ),
               if (fixedWidth == null) ...[
                 const SizedBox(width: 8),
                 Text(
                   label,
                   style: TextStyle(
-                    color: disabled
-                        ? Colors.white24
-                        : Colors.white,
+                    color: disabled ? Colors.white24 : Colors.white,
                     fontWeight: FontWeight.w700,
-                    fontSize: 17,
+                    fontSize: fontSize,
                   ),
                 ),
               ],
