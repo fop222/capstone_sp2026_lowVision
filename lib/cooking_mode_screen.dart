@@ -162,9 +162,13 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
   // ── TTS helpers ─────────────────────────────────────────────────────────
 
-  Future<void> _speak(String text, {int? generation}) async {
+  Future<void> _speak(
+    String text, {
+    int? generation,
+    bool stopBefore = true,
+  }) async {
     if (!mounted) return;
-    await _tts.stop();
+    if (stopBefore) await _tts.stop();
     if (!mounted || (generation != null && generation != _voiceGen)) {
       return;
     }
@@ -468,7 +472,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// Reads the step, then offers a timer when this step has a cooking time.
   Future<void> _speakCurrentStep() async {
     final generation = _voiceGen;
-    await _speak(_currentText, generation: generation);
+    await _speak(_currentText, generation: generation, stopBefore: false);
     if (!mounted || generation != _voiceGen) return;
     if (!mounted) return;
     await _offerTimerForCurrentStep();
@@ -1118,8 +1122,8 @@ class _CookTimerCard extends StatelessWidget {
                         ? Icons.pause_rounded
                         : Icons.play_arrow_rounded,
                     onTap: isRunning ? onPause : onStart,
-                    filled: !isRunning,
-                    outlined: isRunning,
+                    filled: true,
+                    outlined: false,
                     accent: isRunning
                         ? const Color(0xFFE53935)
                         : const Color(0xFF2EAD62),
