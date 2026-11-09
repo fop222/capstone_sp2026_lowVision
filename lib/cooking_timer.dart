@@ -144,6 +144,10 @@ String timerReadySpeech(String timerName, Duration duration) {
 /// Spoken when the cook presses Start.
 String timerStartedSpeech(String timerName) => '$timerName started.';
 
+String timerPausedSpeech(String timerName) => '$timerName paused.';
+
+String timerResumedSpeech(String timerName) => '$timerName resumed.';
+
 /// Spoken for an in-progress remaining-time alert.
 String timerRemainingSpeech(String timerName, Duration remaining) {
   return '$timerName. ${formatCookDuration(remaining)} remaining.';

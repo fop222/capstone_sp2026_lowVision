@@ -486,10 +486,28 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   }
 
   void _startCookTimer(_CookTimer timer) {
-    if (timer.startedAt != null || timer.finished) return;
+    if (timer.isRunning || timer.finished) return;
+    final wasPaused = timer.hasStarted;
+    timer.hasStarted = true;
     setState(() => timer.startedAt = DateTime.now());
     _ensureCookTick();
-    _announce(timerStartedSpeech(_timerName(timer)));
+    _announce(
+      wasPaused
+          ? timerResumedSpeech(_timerName(timer))
+          : timerStartedSpeech(_timerName(timer)),
+    );
+  }
+
+  void _pauseCookTimer(_CookTimer timer) {
+    if (!timer.isRunning || timer.finished) return;
+    timer.elapsedBeforePause = timer.elapsed;
+    timer.startedAt = null;
+    setState(() {});
+    _announce(timerPausedSpeech(_timerName(timer)));
+    if (!_cookTimers.any((t) => t.isRunning)) {
+      _cookTick?.cancel();
+      _cookTick = null;
+    }
   }
 
   void _ensureCookTick() {
@@ -503,7 +521,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     for (final timer in _cookTimers) {
       final startedAt = timer.startedAt;
       if (startedAt == null || timer.finished) continue;
-      final elapsed = DateTime.now().difference(startedAt);
+      final elapsed = timer.elapsed;
       final name = _timerName(timer);
       for (final mark in elapsedAlertMarks(timer.lower, timer.upper)) {
         if (elapsed < mark) break;
@@ -540,7 +558,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     while (mounted && _acceptTimerSpeech && _speaking) {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
-    if (!mounted || !_acceptTimerSpeech || timer?.cleared == true) return;
+    if (!mounted || !_acceptTimerSpeech) return;
     setState(() => _speaking = true);
     try {
       await speakApp(_tts, text);
@@ -573,7 +591,9 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
           separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, index) {
             final timer = ordered[index];
-            final waiting = timer.startedAt == null && !timer.finished;
+            final waiting = !timer.hasStarted && !timer.finished;
+            final paused =
+                timer.hasStarted && !timer.isRunning && !timer.finished;
             return _CookTimerCard(
               name: _timerName(timer),
               clock: timer.finished
@@ -581,12 +601,13 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                   : _formatClock(waiting ? timer.upper : timer.remaining),
               subtitle: _timerSubtitle(timer),
               highlight: timer.stepIndex == _step,
+              paused: paused,
               progress: timer.isRunning
                   ? (timer.elapsed.inMilliseconds / timer.upper.inMilliseconds)
                         .clamp(0.0, 1.0)
                   : null,
-              onStart: waiting ? () => _startCookTimer(timer) : null,
-              onStopClear: () => _stopAndClearCookTimer(timer),
+              onStart: waiting || paused ? () => _startCookTimer(timer) : null,
+              onPause: timer.isRunning ? () => _pauseCookTimer(timer) : null,
             );
           },
         ),
@@ -594,19 +615,10 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     );
   }
 
-  void _stopAndClearCookTimer(_CookTimer timer) {
-    timer.cleared = true;
-    setState(() => _cookTimers.remove(timer));
-    if (!_cookTimers.any((t) => t.isRunning)) {
-      _cookTick?.cancel();
-      _cookTick = null;
-    }
-  }
-
   /// Unstarted timers for the current step stay at the top, then other
   /// unstarted timers, then running ones, then finished ones.
   int _timerSortRank(_CookTimer timer) {
-    final waiting = timer.startedAt == null && !timer.finished;
+    final waiting = !timer.hasStarted && !timer.finished;
     if (waiting && timer.stepIndex == _step) return 0;
     if (waiting) return 1;
     if (timer.isRunning) return 2;
@@ -618,6 +630,9 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
       return '${formatCookDuration(timer.upper)} have passed';
     }
     if (timer.startedAt == null) {
+      if (timer.hasStarted) {
+        return 'Paused at ${_formatClock(timer.elapsed)}.';
+      }
       final setFor = 'Set for ${formatCookDuration(timer.upper)}. Not started.';
       if (!timer.isRange) return setFor;
       return '$setFor Alerts from ${formatCookDuration(timer.lower)}.';
@@ -971,18 +986,19 @@ class _CookTimer {
   final Duration lower;
   final Duration upper;
   DateTime? startedAt;
+  Duration elapsedBeforePause = Duration.zero;
+  bool hasStarted = false;
   bool finished = false;
   bool finishedAnnounced = false;
-  bool cleared = false;
   final Set<int> announcedSeconds = {};
 
   bool get isRange => lower < upper;
   bool get isRunning => startedAt != null && !finished;
 
   Duration get elapsed {
-    final start = startedAt;
-    if (start == null) return Duration.zero;
-    final value = DateTime.now().difference(start);
+    final value = startedAt == null
+        ? elapsedBeforePause
+        : elapsedBeforePause + DateTime.now().difference(startedAt!);
     return value.isNegative ? Duration.zero : value;
   }
 
@@ -998,23 +1014,25 @@ class _CookTimerCard extends StatelessWidget {
     required this.clock,
     required this.subtitle,
     required this.highlight,
+    required this.paused,
     required this.progress,
     required this.onStart,
-    required this.onStopClear,
+    required this.onPause,
   });
 
   final String name;
   final String clock;
   final String subtitle;
   final bool highlight;
+  final bool paused;
   final double? progress;
   final VoidCallback? onStart;
-  final VoidCallback onStopClear;
+  final VoidCallback? onPause;
 
   @override
   Widget build(BuildContext context) {
     final accent = highlight ? kBrandPurpleLight : Colors.white70;
-    final isWaiting = onStart != null;
+    final isRunning = onPause != null;
     return Semantics(
       liveRegion: true,
       label: '$name, $clock. $subtitle',
@@ -1037,7 +1055,7 @@ class _CookTimerCard extends StatelessWidget {
                     name,
                     style: TextStyle(
                       color: accent,
-                      fontSize: 17,
+                      fontSize: 20,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -1046,7 +1064,7 @@ class _CookTimerCard extends StatelessWidget {
                   clock,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 22,
+                    fontSize: 36,
                     fontWeight: FontWeight.w800,
                     fontFeatures: [FontFeature.tabularFigures()],
                   ),
@@ -1056,7 +1074,7 @@ class _CookTimerCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               subtitle,
-              style: const TextStyle(color: Colors.white60, fontSize: 13),
+              style: const TextStyle(color: Colors.white60, fontSize: 18),
             ),
             if (progress != null) ...[
               const SizedBox(height: 9),
@@ -1075,20 +1093,20 @@ class _CookTimerCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: _CookingButton(
-                    label: isWaiting ? 'Start' : 'Stop / Clear',
-                    icon: isWaiting
-                        ? Icons.play_arrow_rounded
-                        : Icons.stop_circle_outlined,
-                    onTap: isWaiting ? onStart : onStopClear,
-                    filled: isWaiting,
-                    outlined: !isWaiting,
-                    accent: isWaiting ? kBrandPurpleLight : Colors.white70,
-                    height: 58,
-                    fontSize: 18,
-                    iconSize: 26,
-                    semanticsLabel: isWaiting
-                        ? 'Start $name'
-                        : 'Stop and clear $name',
+                    label: isRunning ? 'Pause' : (paused ? 'Resume' : 'Start'),
+                    icon: isRunning
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    onTap: isRunning ? onPause : onStart,
+                    filled: !isRunning,
+                    outlined: isRunning,
+                    accent: isRunning ? Colors.white70 : kBrandPurpleLight,
+                    height: 72,
+                    fontSize: 22,
+                    iconSize: 34,
+                    semanticsLabel: isRunning
+                        ? 'Pause $name'
+                        : (paused ? 'Resume $name' : 'Start $name'),
                   ),
                 ),
               ],
