@@ -488,6 +488,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
     final timer = _CookTimer(
       stepIndex: _step,
+      stepText: _currentText,
       lower: parsed.lower,
       upper: parsed.upper,
     );
@@ -496,9 +497,32 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   }
 
   String _timerName(_CookTimer timer) {
-    final base = '${widget.recipe.name} Timer';
-    if (_cookTimers.length < 2) return base;
-    return '$base, step ${timer.stepIndex + 1}';
+    final label = _timerLabel(timer);
+    final sameLabel = _cookTimers.where((other) {
+      return _timerLabel(other) == label;
+    }).length;
+    return sameLabel > 1
+        ? '$label Timer, step ${timer.stepIndex + 1}'
+        : '$label Timer';
+  }
+
+  String _timerLabel(_CookTimer timer) {
+    final step = timer.stepText.toLowerCase();
+    final candidates = <String>[
+      ...widget.recipe.name.split(RegExp(r'\s+(?:and|with)\s+|\s*[+&]\s*')),
+      ...widget.recipe.ingredients.map((ingredient) => ingredient.name),
+    ];
+    for (final candidate in candidates) {
+      final clean = candidate.trim();
+      if (clean.length < 4) continue;
+      final words = clean
+          .toLowerCase()
+          .split(RegExp(r'[^a-z0-9]+'))
+          .where((word) => word.length > 3)
+          .toList();
+      if (words.isNotEmpty && words.any(step.contains)) return clean;
+    }
+    return widget.recipe.name;
   }
 
   void _startCookTimer(_CookTimer timer) {
@@ -606,37 +630,36 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 280),
-        child: ListView.separated(
-          shrinkWrap: true,
-          primary: false,
-          physics: const ClampingScrollPhysics(),
-          itemCount: ordered.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (context, index) {
-            final timer = ordered[index];
-            final waiting = !timer.hasStarted && !timer.finished;
-            final paused =
-                timer.hasStarted && !timer.isRunning && !timer.finished;
-            return _CookTimerCard(
-              name: _timerName(timer),
-              clock: timer.finished
-                  ? 'Finished'
-                  : _formatClock(waiting ? timer.upper : timer.remaining),
-              subtitle: _timerSubtitle(timer),
-              highlight: timer.stepIndex == _step,
-              paused: paused,
-              progress: timer.isRunning
-                  ? (timer.elapsed.inMilliseconds / timer.upper.inMilliseconds)
-                        .clamp(0.0, 1.0)
-                  : null,
-              onStart: waiting || paused ? () => _startCookTimer(timer) : null,
-              onPause: timer.isRunning ? () => _pauseCookTimer(timer) : null,
-            );
-          },
-        ),
+      child: Column(
+        children: [
+          for (var index = 0; index < ordered.length; index++) ...[
+            _buildCookTimerCard(ordered[index]),
+            if (index < ordered.length - 1) const SizedBox(height: 10),
+          ],
+        ],
       ),
+    );
+  }
+
+  Widget _buildCookTimerCard(_CookTimer timer) {
+    final waiting = !timer.hasStarted && !timer.finished;
+    final paused = timer.hasStarted && !timer.isRunning && !timer.finished;
+    return _CookTimerCard(
+      name: _timerName(timer),
+      clock: timer.finished
+          ? 'Finished'
+          : _formatClock(waiting ? timer.upper : timer.remaining),
+      subtitle: _timerSubtitle(timer),
+      highlight: timer.stepIndex == _step,
+      paused: paused,
+      progress: timer.isRunning
+          ? (timer.elapsed.inMilliseconds / timer.upper.inMilliseconds).clamp(
+              0.0,
+              1.0,
+            )
+          : null,
+      onStart: waiting || paused ? () => _startCookTimer(timer) : null,
+      onPause: timer.isRunning ? () => _pauseCookTimer(timer) : null,
     );
   }
 
@@ -714,135 +737,131 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                   horizontal: 24,
                   vertical: 20,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // ── Progress bar ───────────────────────────────────
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: (_step + 1) / _total,
-                        minHeight: 6,
-                        backgroundColor: Colors.white.withValues(alpha: 0.12),
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          kBrandPurpleLight,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // ── Progress bar ───────────────────────────────────
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: (_step + 1) / _total,
+                          minHeight: 6,
+                          backgroundColor: Colors.white.withValues(alpha: 0.12),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            kBrandPurpleLight,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
 
-                    // ── Step label ────────────────────────────────────
-                    Text(
-                      'Step ${_step + 1} of $_total',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: kBrandPurpleLight,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.5,
+                      // ── Step label ────────────────────────────────────
+                      Text(
+                        'Step ${_step + 1} of $_total',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: kBrandPurpleLight,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(height: 12),
 
-                    // ── Hands-Free Mode toggle ────────────────────────
-                    _HandsFreeToggle(
-                      value: _handsFree,
-                      onToggle: (_speaking || _listening || _waitingConfirm)
-                          ? null
-                          : _onToggleHandsFree,
-                    ),
-                    const SizedBox(height: 12),
+                      // ── Hands-Free Mode toggle ────────────────────────
+                      _HandsFreeToggle(
+                        value: _handsFree,
+                        onToggle: (_speaking || _listening || _waitingConfirm)
+                            ? null
+                            : _onToggleHandsFree,
+                      ),
+                      const SizedBox(height: 12),
 
-                    // ── Status indicator ──────────────────────────────
-                    _HFStatusBar(
-                      speaking: _speaking,
-                      listening: _listening,
-                      waitingConfirm: _waitingConfirm,
-                      transcript: _listenTranscript,
-                      handsFree: _handsFree,
-                      speechAvailable: _speechAvailable,
-                    ),
+                      // ── Status indicator ──────────────────────────────
+                      _HFStatusBar(
+                        speaking: _speaking,
+                        listening: _listening,
+                        waitingConfirm: _waitingConfirm,
+                        transcript: _listenTranscript,
+                        handsFree: _handsFree,
+                        speechAvailable: _speechAvailable,
+                      ),
 
-                    // ── Step instruction (main content) ───────────────
-                    Expanded(
-                      child: Padding(
+                      // ── Step instruction (main content) ───────────────
+                      Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Center(
-                          child: SingleChildScrollView(
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.07),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: kBrandPurpleLight.withValues(
-                                    alpha: 0.3,
-                                  ),
-                                  width: 1.5,
-                                ),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.07),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: kBrandPurpleLight.withValues(alpha: 0.3),
+                                width: 1.5,
                               ),
-                              child: Semantics(
-                                liveRegion: true,
-                                child: Text(
-                                  _currentText,
-                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                    color: Colors.white,
-                                    fontSize: 22,
-                                    height: 1.6,
-                                  ),
+                            ),
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                _currentText,
+                                style: theme.textTheme.bodyLarge?.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  height: 1.6,
                                 ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
 
-                    _buildCookTimers(),
+                      _buildCookTimers(),
 
-                    const SizedBox(height: 8),
+                      const SizedBox(height: 8),
 
-                    // ── Primary action buttons ────────────────────────
-                    Row(
-                      children: [
-                        // Previous (only if not on first step)
-                        if (_step > 0) ...[
-                          _CookingButton(
-                            label: '←',
-                            icon: Icons.arrow_back_rounded,
-                            onTap: isIdle ? _onPrev : null,
-                            outlined: true,
-                            fixedWidth: 56,
+                      // ── Primary action buttons ────────────────────────
+                      Row(
+                        children: [
+                          // Previous (only if not on first step)
+                          if (_step > 0) ...[
+                            _CookingButton(
+                              label: '←',
+                              icon: Icons.arrow_back_rounded,
+                              onTap: isIdle ? _onPrev : null,
+                              outlined: true,
+                              fixedWidth: 56,
+                            ),
+                            const SizedBox(width: 10),
+                          ],
+                          // Repeat
+                          Expanded(
+                            child: _CookingButton(
+                              label: 'Repeat',
+                              icon: Icons.replay_rounded,
+                              onTap: isIdle ? _onRepeat : null,
+                              outlined: true,
+                            ),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 14),
+                          // Next / Finish
+                          Expanded(
+                            flex: 2,
+                            child: _CookingButton(
+                              label: _isLast ? 'Finish Cooking' : 'Next',
+                              icon: _isLast
+                                  ? Icons.check_circle_outline_rounded
+                                  : Icons.arrow_forward_rounded,
+                              onTap: isIdle ? _onNext : null,
+                              filled: true,
+                              accent: _isLast
+                                  ? const Color(0xFF4DEBA0)
+                                  : kBrandPurpleLight,
+                            ),
+                          ),
                         ],
-                        // Repeat
-                        Expanded(
-                          child: _CookingButton(
-                            label: 'Repeat',
-                            icon: Icons.replay_rounded,
-                            onTap: isIdle ? _onRepeat : null,
-                            outlined: true,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        // Next / Finish
-                        Expanded(
-                          flex: 2,
-                          child: _CookingButton(
-                            label: _isLast ? 'Finish Cooking' : 'Next',
-                            icon: _isLast
-                                ? Icons.check_circle_outline_rounded
-                                : Icons.arrow_forward_rounded,
-                            onTap: isIdle ? _onNext : null,
-                            filled: true,
-                            accent: _isLast
-                                ? const Color(0xFF4DEBA0)
-                                : kBrandPurpleLight,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1002,11 +1021,13 @@ class _HFStatusBar extends StatelessWidget {
 class _CookTimer {
   _CookTimer({
     required this.stepIndex,
+    required this.stepText,
     required this.lower,
     required this.upper,
   });
 
   final int stepIndex;
+  final String stepText;
   final Duration lower;
   final Duration upper;
   DateTime? startedAt;
