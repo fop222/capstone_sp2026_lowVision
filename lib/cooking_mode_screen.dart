@@ -851,7 +851,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                               icon: _isLast
                                   ? Icons.check_circle_outline_rounded
                                   : Icons.arrow_forward_rounded,
-                              onTap: _onNext,
+                              onTap: isIdle ? _onNext : null,
                               filled: true,
                               accent: _isLast
                                   ? const Color(0xFF4DEBA0)
