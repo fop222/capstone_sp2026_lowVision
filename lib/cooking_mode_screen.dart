@@ -835,9 +835,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                             ),
                           ),
                           const SizedBox(width: 14),
-                          // Next / Finish stays available while a step is
-                          // being read or Hands-Free is listening, so the cook
-                          // can move on midway through the recipe.
+                          // Next / Finish
                           Expanded(
                             flex: 2,
                             child: _CookingButton(
@@ -845,7 +843,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
                               icon: _isLast
                                   ? Icons.check_circle_outline_rounded
                                   : Icons.arrow_forward_rounded,
-                              onTap: _onNext,
+                              onTap: isIdle ? _onNext : null,
                               filled: true,
                               accent: _isLast
                                   ? const Color(0xFF4DEBA0)
