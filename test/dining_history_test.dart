@@ -77,12 +77,14 @@ void main() {
     expect(find.text('Scan Buffet / Food'), findsOneWidget);
     expect(find.text('See scan history'), findsOneWidget);
     expect(find.bySemanticsLabel('See scan history'), findsOneWidget);
-    // Paddle OCR sits directly under Scan Buffet.
-    final scanTop = tester.getTopLeft(find.text('Scan Buffet / Food')).dy;
-    final paddleTop = tester.getTopLeft(find.text('Scan with Paddle OCR')).dy;
-    final historyTop = tester.getTopLeft(find.text('See scan history')).dy;
-    expect(scanTop, lessThan(paddleTop));
-    expect(paddleTop, lessThan(historyTop));
+    // Paddle OCR scan is hidden for now.
+    expect(find.text('Scan with Paddle OCR'), findsNothing);
+    // // Paddle OCR sits directly under Scan Buffet.
+    // final scanTop = tester.getTopLeft(find.text('Scan Buffet / Food')).dy;
+    // final paddleTop = tester.getTopLeft(find.text('Scan with Paddle OCR')).dy;
+    // final historyTop = tester.getTopLeft(find.text('See scan history')).dy;
+    // expect(scanTop, lessThan(paddleTop));
+    // expect(paddleTop, lessThan(historyTop));
   });
 
   testWidgets('history lists scans with times and opens one', (tester) async {

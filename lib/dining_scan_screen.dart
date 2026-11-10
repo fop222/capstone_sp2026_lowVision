@@ -13,11 +13,12 @@ import 'dining_food.dart';
 import 'dining_history.dart';
 import 'dining_image_strips.dart';
 import 'dining_ocr.dart';
-import 'dining_paddle.dart';
+// Paddle OCR scan is commented out for now.
+// import 'dining_paddle.dart';
 import 'dining_results_screen.dart';
 import 'grocery_ui.dart';
 import 'ocr_config.dart';
-import 'paddle_ocr.dart';
+// import 'paddle_ocr.dart';
 import 'take_picture_screen.dart' show backCamerasOnly;
 
 /// One `/predict` call; the Vercel proxy itself gives up at 60 s.
@@ -29,10 +30,13 @@ const Duration _kCloserLookBudget = Duration(seconds: 50);
 
 /// Captures or uploads one dining photo and sends it through `/predict`.
 class DiningScanScreen extends StatefulWidget {
-  const DiningScanScreen({super.key, this.paddleOnly = false});
+  const DiningScanScreen({super.key});
 
-  /// Reads the signs with Paddle OCR in the browser only; no VLM call.
-  final bool paddleOnly;
+  // Paddle OCR scan is commented out for now.
+  // const DiningScanScreen({super.key, this.paddleOnly = false});
+  //
+  // /// Reads the signs with Paddle OCR in the browser only; no VLM call.
+  // final bool paddleOnly;
 
   @override
   State<DiningScanScreen> createState() => _DiningScanScreenState();
@@ -61,21 +65,23 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
   void initState() {
     super.initState();
     _initCamera();
-    // Start the model download while the user lines up the photo.
-    if (widget.paddleOnly) {
-      unawaited(
-        paddleWarmUp().catchError((Object error) {
-          debugPrint('Paddle OCR warm-up failed: $error');
-        }),
-      );
-    }
+    // Paddle OCR scan is commented out for now.
+    // // Start the model download while the user lines up the photo.
+    // if (widget.paddleOnly) {
+    //   unawaited(
+    //     paddleWarmUp().catchError((Object error) {
+    //       debugPrint('Paddle OCR warm-up failed: $error');
+    //     }),
+    //   );
+    // }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _speak(
-        widget.paddleOnly
-            ? 'Paddle O C R scan. Point your camera at the food signs. '
-                  'Then take a photo or upload an image.'
-            : 'Dining scan. Point your camera at the buffet, plate, or tray. '
-                  'Then take a photo or upload an image.',
+        // widget.paddleOnly
+        //     ? 'Paddle O C R scan. Point your camera at the food signs. '
+        //           'Then take a photo or upload an image.'
+        //     :
+        'Dining scan. Point your camera at the buffet, plate, or tray. '
+        'Then take a photo or upload an image.',
       );
     });
   }
@@ -206,9 +212,8 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     });
     unawaited(
       _speak(
-        widget.paddleOnly
-            ? 'Reading the signs.'
-            : 'Reading food and drink labels, then identifying items.',
+        // widget.paddleOnly ? 'Reading the signs.' :
+        'Reading food and drink labels, then identifying items.',
       ),
     );
     // Visible seconds and a periodic spoken update, so a long scan never
@@ -221,9 +226,11 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     });
 
     final photo = await shrinkDiningPhoto(bytes);
-    final result = widget.paddleOnly
-        ? await _runPaddleScan(photo)
-        : await _runDiningPredict(photo);
+    // Paddle OCR scan is commented out for now.
+    // final result = widget.paddleOnly
+    //     ? await _runPaddleScan(photo)
+    //     : await _runDiningPredict(photo);
+    final result = await _runDiningPredict(photo);
     _progressTimer?.cancel();
     if (!mounted) return;
     setState(() => _analyzing = false);
@@ -319,36 +326,37 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
     }
   }
 
-  /// Paddle OCR only: each dish card it reads becomes a food. No VLM.
-  Future<DiningParseResult> _runPaddleScan(Uint8List bytes) async {
-    try {
-      final read = PaddleRead.fromJson(
-        await paddleReadText(bytes).timeout(const Duration(seconds: 90)),
-      );
-      final result = diningFoodsFromPaddle(read);
-      if (result.foods.isNotEmpty) return result;
-      final text = read.text.trim();
-      return DiningParseResult(
-        foods: const [],
-        error: text.isEmpty
-            ? 'Paddle OCR found no sign text. Try again closer to the sign.'
-            : 'Paddle OCR found no dish name. It read: '
-                  '${text.replaceAll('\n', '. ')}',
-      );
-    } on UnsupportedError {
-      return const DiningParseResult(
-        foods: [],
-        error: 'Paddle OCR works in the web app only.',
-      );
-    } catch (error) {
-      debugPrint('Paddle OCR failed: $error');
-      return const DiningParseResult(
-        foods: [],
-        error:
-            'Paddle OCR could not read this photo. Check your connection and try again.',
-      );
-    }
-  }
+  // Paddle OCR scan is commented out for now.
+  // /// Paddle OCR only: each dish card it reads becomes a food. No VLM.
+  // Future<DiningParseResult> _runPaddleScan(Uint8List bytes) async {
+  //   try {
+  //     final read = PaddleRead.fromJson(
+  //       await paddleReadText(bytes).timeout(const Duration(seconds: 90)),
+  //     );
+  //     final result = diningFoodsFromPaddle(read);
+  //     if (result.foods.isNotEmpty) return result;
+  //     final text = read.text.trim();
+  //     return DiningParseResult(
+  //       foods: const [],
+  //       error: text.isEmpty
+  //           ? 'Paddle OCR found no sign text. Try again closer to the sign.'
+  //           : 'Paddle OCR found no dish name. It read: '
+  //                 '${text.replaceAll('\n', '. ')}',
+  //     );
+  //   } on UnsupportedError {
+  //     return const DiningParseResult(
+  //       foods: [],
+  //       error: 'Paddle OCR works in the web app only.',
+  //     );
+  //   } catch (error) {
+  //     debugPrint('Paddle OCR failed: $error');
+  //     return const DiningParseResult(
+  //       foods: [],
+  //       error:
+  //           'Paddle OCR could not read this photo. Check your connection and try again.',
+  //     );
+  //   }
+  // }
 
   Future<DiningParseResult> _runDiningPredict(Uint8List bytes) async {
     final result = await _runDiningScan(bytes);
@@ -528,9 +536,11 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: Text(
-          widget.paddleOnly ? 'Scan with Paddle OCR' : 'Scan Buffet / Food',
-        ),
+        // Paddle OCR scan is commented out for now.
+        // title: Text(
+        //   widget.paddleOnly ? 'Scan with Paddle OCR' : 'Scan Buffet / Food',
+        // ),
+        title: const Text('Scan Buffet / Food'),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Column(
@@ -557,9 +567,9 @@ class _DiningScanScreenState extends State<DiningScanScreen> {
                 const CircularProgressIndicator(color: kBrandPurpleLight),
                 const SizedBox(height: 16),
                 Text(
-                  '${widget.paddleOnly
-                      ? 'Reading signs with Paddle OCR…'
-                      : _readingLabels
+                  // Paddle OCR scan is commented out for now:
+                  // widget.paddleOnly ? 'Reading signs with Paddle OCR…' :
+                  '${_readingLabels
                       ? 'Reading food and drink labels…'
                       : _lookingCloser
                       ? 'Looking closer at each part…'
