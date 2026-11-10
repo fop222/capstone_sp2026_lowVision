@@ -417,7 +417,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
-      _speakCurrentStep();
+      await _speakCurrentStep();
     }
   }
 
@@ -432,7 +432,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
     if (_handsFree) {
       _runHandsFreeStep();
     } else {
-      _speakCurrentStep();
+      await _speakCurrentStep();
     }
   }
 
@@ -473,7 +473,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// Reads the step, then offers a timer when this step has a cooking time.
   Future<void> _speakCurrentStep() async {
     final generation = _voiceGen;
-    await _speak(_currentText, generation: generation, stopBefore: false);
+    await _speak(_currentText, generation: generation);
     if (!mounted || generation != _voiceGen) return;
     if (!mounted) return;
     await _offerTimerForCurrentStep();
