@@ -69,7 +69,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// check this before acting to avoid stale results advancing the recipe.
   int _hfGen = 0;
   int _voiceGen = 0;
-  bool _manualNavigationInProgress = false;
+  Future<void> _manualSpeechQueue = Future<void>.value();
 
   // ── Cooking timers ───────────────────────────────────────────────────────
   /// One timer per step that mentions a time. Survives step changes.
@@ -412,35 +412,51 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
 
   Future<void> _onPrev() async {
     if (_step == 0) return;
-    await _cancelVoice();
-    if (!mounted) return;
-    setState(() => _step--);
-    if (_handsFree) {
-      _runHandsFreeStep();
-    } else {
-      await _speakCurrentStep();
-    }
+    _navigateToStep(_step - 1);
   }
 
   Future<void> _onNext() async {
-    if (_manualNavigationInProgress) return;
-    _manualNavigationInProgress = true;
-    try {
-      if (_isLast) {
-        await _onFinish();
-        return;
-      }
-      await _cancelVoice();
-      if (!mounted) return;
-      setState(() => _step++);
-      if (_handsFree) {
-        _runHandsFreeStep();
-      } else {
-        await _speakCurrentStep();
-      }
-    } finally {
-      _manualNavigationInProgress = false;
+    if (_isLast) {
+      await _onFinish();
+      return;
     }
+    _navigateToStep(_step + 1);
+  }
+
+  void _navigateToStep(int targetStep) {
+    if (!mounted) return;
+
+    _hfGen++;
+    _voiceGen++;
+    _timerSpeechGeneration++;
+    final request = _voiceGen;
+    final text = _steps[targetStep];
+
+    setState(() {
+      _step = targetStep;
+      _speaking = false;
+      _listening = false;
+      _waitingConfirm = false;
+      _listenTranscript = '';
+    });
+
+    if (_handsFree) {
+      _runHandsFreeStep();
+      return;
+    }
+
+    _manualSpeechQueue = _manualSpeechQueue.then((_) async {
+      await _tts.stop();
+      if (!mounted || request != _voiceGen) return;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      if (!mounted || request != _voiceGen) return;
+      setState(() => _speaking = true);
+      await speakApp(_tts, text);
+      if (mounted && request == _voiceGen) {
+        setState(() => _speaking = false);
+        await _offerTimerForCurrentStep();
+      }
+    });
   }
 
   Future<void> _onRepeat() async {
