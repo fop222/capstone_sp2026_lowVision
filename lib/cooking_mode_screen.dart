@@ -69,6 +69,7 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   /// check this before acting to avoid stale results advancing the recipe.
   int _hfGen = 0;
   int _voiceGen = 0;
+  bool _manualNavigationInProgress = false;
 
   // ── Cooking timers ───────────────────────────────────────────────────────
   /// One timer per step that mentions a time. Survives step changes.
@@ -422,17 +423,23 @@ class _CookingModeScreenState extends State<CookingModeScreen> {
   }
 
   Future<void> _onNext() async {
-    if (_isLast) {
-      _onFinish();
-      return;
-    }
-    await _cancelVoice();
-    if (!mounted) return;
-    setState(() => _step++);
-    if (_handsFree) {
-      _runHandsFreeStep();
-    } else {
-      await _speakCurrentStep();
+    if (_manualNavigationInProgress) return;
+    _manualNavigationInProgress = true;
+    try {
+      if (_isLast) {
+        await _onFinish();
+        return;
+      }
+      await _cancelVoice();
+      if (!mounted) return;
+      setState(() => _step++);
+      if (_handsFree) {
+        _runHandsFreeStep();
+      } else {
+        await _speakCurrentStep();
+      }
+    } finally {
+      _manualNavigationInProgress = false;
     }
   }
 
