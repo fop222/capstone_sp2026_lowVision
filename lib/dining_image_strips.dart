@@ -53,6 +53,11 @@ Future<Uint8List> rescaleDiningPhoto(Uint8List photo, double scale) async {
   }
 }
 
+/// The same size limit for every photo upload (aisle signs, shelves), not
+/// just dining.
+Future<Uint8List> shrinkPhotoForUpload(Uint8List photo) =>
+    shrinkDiningPhoto(photo);
+
 Future<Uint8List> shrinkDiningPhoto(Uint8List photo) async {
   if (photo.lengthInBytes <= _kMaxUploadBytes) return photo;
   try {

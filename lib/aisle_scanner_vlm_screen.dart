@@ -16,6 +16,7 @@ import 'aisle_category_group.dart';
 import 'app_tts.dart';
 import 'app_speech.dart';
 import 'app_voice_policy.dart';
+import 'dining_image_strips.dart' show shrinkPhotoForUpload;
 import 'grocery_list_detail_screen.dart';
 import 'main.dart';
 import 'ocr_config.dart';
@@ -676,9 +677,11 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       return;
     }
 
+    // Medium (about 720x480) left the letters of a distant aisle sign too
+    // few pixels tall for OCR. Photos are shrunk before upload anyway.
     final ctrl = CameraController(
       widget.cameras.first,
-      ResolutionPreset.medium,
+      ResolutionPreset.high,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -732,13 +735,22 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   }
 
   Future<Uint8List?> _pickFromGallery() async {
-    final xFile = await _picker.pickImage(source: ImageSource.gallery);
+    // A phone photo is 3-14 MB; Vercel rejects uploads over 4.5 MB (413),
+    // which showed as "could not read the aisle sign" on clear photos.
+    // 2048 px keeps big sign text sharp for OCR.
+    final xFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 2048,
+      maxHeight: 2048,
+      imageQuality: 85,
+    );
     if (xFile == null) return null;
     return await xFile.readAsBytes();
   }
 
   Future<String?> _runOcr(Uint8List bytes) async {
     try {
+      bytes = await shrinkPhotoForUpload(bytes);
       final req = http.MultipartRequest('POST', ocrMultipartUri())
         ..files.add(
           http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'),
@@ -791,6 +803,7 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   }) async {
     try {
       if (kDebugMode) debugPrint('[pantry-debug] exact prompt:\n$question');
+      bytes = await shrinkPhotoForUpload(bytes);
       final req = http.MultipartRequest('POST', vlmPredictUri())
         ..files.add(
           http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'),
