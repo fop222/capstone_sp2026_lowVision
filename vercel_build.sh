@@ -4,7 +4,10 @@ set -euo pipefail
 # Vercel build environment does not include Flutter by default.
 # This script installs Flutter (stable) and builds the web bundle to build/web.
 
-FLUTTER_VERSION="${FLUTTER_VERSION:-stable}"
+# Pinned to the version the app is built and tested with locally. "stable"
+# moved to 3.50.0 on 2026-11-11 and the next deploy failed. Override with the
+# FLUTTER_VERSION env var in Vercel when upgrading on purpose.
+FLUTTER_VERSION="${FLUTTER_VERSION:-3.47.7}"
 FLUTTER_DIR="${FLUTTER_DIR:-/tmp/flutter}"
 
 if [ ! -d "$FLUTTER_DIR" ]; then
