@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import 'aisle_category_group.dart';
+import 'aisle_food_groups.dart';
 import 'app_tts.dart';
 import 'app_speech.dart';
 import 'app_voice_policy.dart';
@@ -99,7 +100,7 @@ String _aisleScanFeedback({
 }) {
   final categories = matches
     .map((e) => e.category)
-    .where((c) => c.isNotEmpty)
+    .where((c) => c.isNotEmpty && c.trim().toLowerCase() != 'other')
     .toSet()
     .toList();
 
@@ -107,12 +108,20 @@ String _aisleScanFeedback({
     return _noListMatchesInAisleMessage(rawAisleText);
   }
   final itemsLine = _aisleItemsToFindLine(matches);
-  final aisleLabel = categories.isEmpty
-      ? null
-      : _englishNameList(categories);
+  // Items in "Other" used to make this "the Other aisle" (or "the null
+  // aisle"); the sign's own group ("fruit") reads better.
+  final signGroups =
+      aisleGroupsOnSign(rawAisleText).map((g) => g.label).toList();
+  final aisleLabel = categories.isNotEmpty
+      ? _englishNameList(categories)
+      : signGroups.isNotEmpty
+      ? _englishNameList(signGroups)
+      : null;
+  final where = aisleLabel == null
+      ? 'You are in the right aisle.'
+      : 'You are in the $aisleLabel aisle.';
 
-  return 'You are in the $aisleLabel aisle. '
-      '$itemsLine Walk in and tap Scan Shelf when you are ready.';
+  return '$where $itemsLine Walk in and tap Scan Shelf when you are ready.';
 }
 
 String _humanizeShelfLocationPhrases(String input) {
@@ -1170,7 +1179,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
     final categoriesHit = <String>{};
 
     for (final item in unchecked) {
-      if (_itemMatchesText(item, words)) {
+      // The sign may name the item's group instead of the item: "FRUITS"
+      // for berries, "DAIRY" for milk.
+      if (_itemMatchesText(item, words) ||
+          aisleSignCoversItem(text, item.name, item.category)) {
         byId[item.id] = item;
         final key = _categoryGroupKey(item.category);
         if (key.isNotEmpty) categoriesHit.add(key);
