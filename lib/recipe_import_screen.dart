@@ -116,6 +116,13 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
         );
         _urlLoading = false;
       });
+    } on _SiteBlockedException {
+      setState(() {
+        _urlError =
+            'This website blocks apps from reading its recipes. Take '
+            'screenshots of the recipe and use Import from Screenshots below.';
+        _urlLoading = false;
+      });
     } catch (_) {
       setState(() {
         _urlError = 'Could not load the page. Please check the URL and try again.';
@@ -132,7 +139,25 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
     if (body.containsKey('error')) throw Exception(body['error']);
     final html = body['html'] as String? ?? '';
     if (html.isEmpty) throw Exception('Empty response');
+    final siteStatus = body['status'];
+    final refused =
+        (siteStatus == 401 || siteStatus == 403 || siteStatus == 429) &&
+        !html.contains('application/ld+json');
+    if (refused || _isBotCheckPage(html)) {
+      throw const _SiteBlockedException();
+    }
     return html;
+  }
+
+  /// Sites behind Cloudflare and similar services send apps a "Just a
+  /// moment..." check page instead of the recipe (e.g. The Mediterranean
+  /// Dish). The page has no recipe data, so say so plainly.
+  bool _isBotCheckPage(String html) {
+    final head = html.length > 4000 ? html.substring(0, 4000) : html;
+    return head.contains('<title>Just a moment') ||
+        head.contains('challenges.cloudflare.com') ||
+        head.contains('cf-browser-verification') ||
+        head.contains('<title>Access Denied');
   }
 
   // ── Screenshot import pipeline ─────────────────────────────────────────────
@@ -540,6 +565,11 @@ class _RecipeImportScreenState extends State<RecipeImportScreen> {
 }
 
 // ─── Shared UI components ─────────────────────────────────────────────────────
+
+/// The recipe site answered with a bot check or "access denied" page.
+class _SiteBlockedException implements Exception {
+  const _SiteBlockedException();
+}
 
 class _SectionHeading extends StatelessWidget {
   const _SectionHeading({required this.icon, required this.title});
