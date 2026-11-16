@@ -357,6 +357,12 @@ const _shoppingMenuOrderDefault = [
 
 const _prefsVlmMenuOrder = 'vlm_shopping_menu_order_v1';
 
+/// One OCR or shelf-scan request; the Vercel proxy itself gives up at 60 s.
+const Duration _kScanCallTimeout = Duration(seconds: 58);
+
+/// Shrinking a photo before upload; past this the original is sent.
+const Duration _kShrinkTimeout = Duration(seconds: 10);
+
 const _kUnreadableAisleMessage =
     'I could not read the aisle sign. Please retake the photo. If needed, tap Get Help from store employee.';
 
@@ -759,14 +765,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
 
   Future<String?> _runOcr(Uint8List bytes) async {
     try {
-      bytes = await shrinkPhotoForUpload(bytes);
+      final photo = bytes;
+      bytes = await shrinkPhotoForUpload(
+        photo,
+      ).timeout(_kShrinkTimeout, onTimeout: () => photo);
       final req = http.MultipartRequest('POST', ocrMultipartUri())
         ..files.add(
           http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'),
         );
 
-      final res = await req.send();
-      final body = await res.stream.bytesToString();
+      // Never wait forever: the Vercel proxy itself gives up at 60 s.
+      final res = await req.send().timeout(_kScanCallTimeout);
+      final body = await res.stream.bytesToString().timeout(_kScanCallTimeout);
 
       if (res.statusCode == 200) {
         final data = json.decode(body) as Map<String, dynamic>;
@@ -812,15 +822,18 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
   }) async {
     try {
       if (kDebugMode) debugPrint('[pantry-debug] exact prompt:\n$question');
-      bytes = await shrinkPhotoForUpload(bytes);
+      final photo = bytes;
+      bytes = await shrinkPhotoForUpload(
+        photo,
+      ).timeout(_kShrinkTimeout, onTimeout: () => photo);
       final req = http.MultipartRequest('POST', vlmPredictUri())
         ..files.add(
           http.MultipartFile.fromBytes('image', bytes, filename: 'img.png'),
         )
         ..fields['question'] = question;
 
-      final res = await req.send();
-      final body = await res.stream.bytesToString();
+      final res = await req.send().timeout(_kScanCallTimeout);
+      final body = await res.stream.bytesToString().timeout(_kScanCallTimeout);
 
       if (res.statusCode != 200) {
         // Surface server errors instead of swallowing them.
@@ -3099,7 +3112,17 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
       _lastSpoken = text;
     }
     if (AppVoicePolicy.ttsMuted || !mounted) return;
-    await speakApp(_tts, text);
+    // iOS Safari sometimes never reports that speech finished, which left
+    // "Processing photo…" on screen forever before the photo was even sent.
+    // Wait about as long as the sentence takes to say, then move on.
+    final limit = Duration(
+      milliseconds: (2500 + text.length * 90).clamp(2500, 20000),
+    );
+    try {
+      await speakApp(_tts, text).timeout(limit);
+    } catch (error) {
+      debugPrint('Shopping TTS unavailable or slow: $error');
+    }
   }
 
   Future<void> _speak(String english) async {
