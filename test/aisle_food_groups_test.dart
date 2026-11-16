@@ -117,4 +117,23 @@ void main() {
     expect(aisleSignCoversItem('DAIRY', 'Fresh mozzarella', ''), isTrue);
     expect(aisleSignCoversItem('WINE & BEER', 'white wine', ''), isTrue);
   });
+
+  test('a shelf answer may name a variety of the item', () {
+    // Real answer from the shelf scan of a photo of apples.
+    const answer =
+        'Item: Red Delicious Location: top shelf on the left ITEM FOUND';
+    expect(shelfAnswerNamesItem(answer, 'Apples'), isTrue);
+    expect(shelfAnswerNamesItem(answer, 'Bananas'), isFalse);
+    expect(
+      shelfAnswerNamesItem('Item: Doritos Nacho', 'Tortilla Chips'),
+      isTrue,
+    );
+    expect(shelfAnswerNamesItem('Item: Strawberries', 'Berries'), isTrue);
+  });
+
+  test('a bread sign is not a pasta aisle', () {
+    expect(aisleGroupsOnSign('BAKERY WHOLE GRAIN WHEAT').map((g) => g.label), [
+      'bakery',
+    ]);
+  });
 }

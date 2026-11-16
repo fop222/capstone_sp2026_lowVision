@@ -1228,7 +1228,10 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
                 .hasMatch(vlmAnswer) ||
             RegExp(r'\bMOVE\s+ALONG\b', caseSensitive: false)
                 .hasMatch(vlmAnswer));
-    final answerNamesTarget = _vlmAnswerMatchesTarget(vlmAnswer, target);
+    // The model may name a variety instead ("Red Delicious" for apples).
+    final answerNamesTarget =
+        _vlmAnswerMatchesTarget(vlmAnswer, target) ||
+        shelfAnswerNamesItem(vlmAnswer, target.name);
     final answerRejectsTarget = _vlmExplicitlyRejectsTarget(vlmAnswer, target);
     final targetOnShelfByOcr =
         _itemMatchesText(target, _tokenize(shelfText));

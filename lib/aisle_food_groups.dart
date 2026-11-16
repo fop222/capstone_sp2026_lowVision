@@ -262,7 +262,8 @@ const List<AisleFoodGroup> kAisleFoodGroups = [
   ),
   AisleFoodGroup(
     'pasta and rice',
-    ['pasta', 'rice', 'grain', 'noodle'],
+    // Not "grain": bread signs print "WHOLE GRAIN".
+    ['pasta', 'rice', 'noodle'],
     [
       'pasta',
       'spaghetti',
@@ -575,4 +576,58 @@ bool aisleSignCoversItem(String signText, String name, String category) {
   final onSign = aisleGroupsOnSign(signText);
   if (onSign.isEmpty) return false;
   return aisleGroupsForItem(name, category).any(onSign.contains);
+}
+
+/// Names a shelf model gives instead of the item itself: asked about
+/// "Apples", it answered "Item: Red Delicious ... ITEM FOUND".
+const Map<String, List<String>> _kVarieties = {
+  'apple': [
+    'red delicious',
+    'golden delicious',
+    'gala',
+    'fuji',
+    'granny smith',
+    'honeycrisp',
+    'mcintosh',
+    'pink lady',
+    'braeburn',
+    'envy',
+    'jazz',
+    'ambrosia',
+    'cosmic crisp',
+    'empire',
+    'jonagold',
+    'macoun',
+  ],
+  'berry': [
+    'strawberry',
+    'blueberry',
+    'raspberry',
+    'blackberry',
+    'cranberry',
+    'mixed berry',
+  ],
+  'banana': ['plantain'],
+  'orange': ['navel', 'mandarin', 'clementine', 'tangerine', 'cara cara'],
+  'grape': ['red seedless', 'green seedless', 'concord'],
+  'potato': ['russet', 'yukon gold', 'red potato', 'fingerling'],
+  'onion': ['vidalia', 'shallot'],
+  'lettuce': ['romaine', 'iceberg', 'butter lettuce', 'spring mix'],
+  'pepper': ['bell pepper', 'jalapeno', 'poblano'],
+  'tomato': ['roma', 'cherry tomato', 'grape tomato', 'heirloom'],
+  'chip': ['doritos', 'lays', 'pringles', 'tostitos', 'ruffles', 'cheetos'],
+  'soda': ['pepsi', 'coke', 'coca cola', 'sprite', 'fanta', 'dr pepper'],
+  'water': ['evian', 'fiji', 'dasani', 'aquafina', 'smartwater', 'volvic'],
+};
+
+/// True when a shelf scan answer names [itemName] or a variety of it
+/// ("Red Delicious" for apples, "Doritos" for chips).
+bool shelfAnswerNamesItem(String answer, String itemName) {
+  final said = _words(answer);
+  for (final word in _words(itemName)) {
+    for (final variety in _kVarieties[word] ?? const <String>[]) {
+      if (_phraseEnd(said, _words(variety)) >= 0) return true;
+    }
+  }
+  return false;
 }
