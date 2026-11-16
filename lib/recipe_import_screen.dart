@@ -20,6 +20,7 @@ import 'imported_recipes_state.dart';
 import 'ocr_config.dart';
 import 'recipe_data.dart';
 import 'recipe_detail_screen.dart';
+import 'recipe_ingredient_text.dart';
 
 // ─── Public entry-point ───────────────────────────────────────────────────────
 
@@ -991,8 +992,8 @@ Recipe _buildRecipeFromSchema(Map<dynamic, dynamic> s, String sourceUrl) {
       final text =
           _decodeHtmlEntities(_str(item)?.trim() ?? '');
       if (text.isEmpty) continue;
-      final parts = _splitQuantityName(text);
-      final cleanedName = _cleanIngredientName(parts.$2);
+      final parts = splitIngredientQuantity(text);
+      final cleanedName = cleanIngredientName(parts.$2);
       if (cleanedName.isEmpty) continue;
       ingredients
           .add(RecipeIngredient(cleanedName, quantity: parts.$1));
@@ -1072,26 +1073,6 @@ String _decodeHtmlEntities(String s) {
         final code = int.tryParse(m.group(1)!) ?? 0;
         return code > 0 ? String.fromCharCode(code) : '';
       });
-}
-
-(String, String) _splitQuantityName(String text) {
-  final t = _decodeHtmlEntities(text);
-  const num = r'[\d\.\/\s¼½¾⅓⅔⅛⅜⅝⅞]+';
-  const units =
-      r'cup|cups|tablespoon|tablespoons|tbsp|teaspoon|teaspoons|tsp|'
-      r'oz|ounce|ounces|pound|pounds|lb|lbs|gram|grams|g|kg|ml|'
-      r'liter|liters|l|can|cans|bunch|bunches|clove|cloves|'
-      r'slice|slices|piece|pieces|package|packages|pkg|'
-      r'bag|bags|box|boxes|stick|sticks|bar|bars|'
-      r'sprig|sprigs|sheet|sheets|strip|strips|'
-      r'to taste|as needed|pinch';
-  final re = RegExp('^($num(?:$units)\\b)\\s*(.*)', caseSensitive: false);
-  final m = re.firstMatch(t);
-  if (m != null) return (m.group(1)!.trim(), m.group(2)!.trim());
-  final numRe = RegExp(r'^([\d\.\/\s¼½¾⅓⅔⅛⅜⅝⅞]+)\s+(.+)');
-  final nm = numRe.firstMatch(t);
-  if (nm != null) return (nm.group(1)!.trim(), nm.group(2)!.trim());
-  return ('', t);
 }
 
 List<String> _inferToolsFromText(String stepsText) {
@@ -1174,13 +1155,6 @@ List<String> _parseDietaryPrefs(Map<dynamic, dynamic> s) {
     }
   }
   return tags;
-}
-
-String _cleanIngredientName(String raw) {
-  var s = raw.replaceAll(RegExp(r'\(.*?\)'), '');
-  final commaIdx = s.indexOf(',');
-  if (commaIdx >= 0) s = s.substring(0, commaIdx);
-  return s.trim();
 }
 
 int? _parseServings(dynamic raw) {
