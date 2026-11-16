@@ -1237,7 +1237,14 @@ class _AisleScannerVlmScreenState extends State<AisleScannerVlmScreen> {
         _itemMatchesText(target, _tokenize(shelfText));
     // Require explicit ITEM FOUND OR OCR overlap with the list item. Pure name
     // fuzzy-match on VLM text alone caused false positives (e.g. car photo → soda).
+    // The prompt asks for blocks only for matching products. On a full shelf
+    // the model lists them until the output limit and never reaches the
+    // closing ITEM FOUND, so a listed block that names the item counts.
+    final listedAsMatch = !explicitNeg &&
+        _looksLikeStructuredShelfOutput(vlmAnswer) &&
+        answerNamesTarget;
     final vlmSaysFound = taggedFound ||
+        listedAsMatch ||
         (!explicitNeg &&
             targetOnShelfByOcr &&
             _vlmAnswerMatchesTarget(vlmAnswer, target));
